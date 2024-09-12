@@ -114,7 +114,8 @@ Netcraft can be used to fingerprint websites. It can be found at [netcraft](http
 
 There is a free tool on their website called `Whats that site running?`
 
->[!TIP]Since Netcraft gives us a good high level overview of what we are up against when it comes to a target organizations web prescence - it makes sense to run it right at the start of our testing cycle along with `whois`
+>[!TIP]
+>Since Netcraft gives us a good high level overview of what we are up against when it comes to a target organizations web prescence - it makes sense to run it right at the start of our testing cycle along with `whois`
 
 Netcraft returns lots of useful information. We can get to know more about technologies being used by the target website - this means we get a basic fingerprint of the website just by using netcraft.
 
