@@ -1,1 +1,1 @@
-# ad-enumeration-basic-attacks
+👹 enumerating active directory and performing basic attacks 👹
