@@ -203,3 +203,180 @@ We can use the data from *dehashed* to assist in creating a username list for ou
 >[!TIP]
 >We can use `sudo python3 dehashed.py -q tezzla.com -p` from a bash session if we have *dehashed.py* on our machine
 
+## Initial Domain Enumeration
+
+We are going to look at this initial enumeration of a domain from the point of view of having a connection to a linux machine on the domain along with a subnet which is in scope but no other data to work with.
+
+>[!NOTE]
+>Organizations we are testing will give us various ways to access their internal networks - the example we are working with here is a common one
+
+We first of all want to get an idea about the network we have been attached to - we can look for:
+
+- Hosts
+- Services | e.g. Kerberos, NetBIOS, LDAP, DNS
+- AD Users
+- AD Joined Computers
+- Potential Vulnerabilities
+
+>[!IMPORTANT]
+>We need to systematically record all our findings during this initial enumeration stage - all data is useful
+
+In order to enumerate the domain we can use *passive* and if in scope *active* techniques.
+
+We will begin using a *passive* technique as it is best to keep as quiet as we can on networks.
+
+### Listening to the Network Traffic
+
+It is a good idea to listen to network traffic passively using tools such as `tcpdump` and `wireshark`
+
+If we have access to a GUI we can use `wireshark` directly, but this is not always the case as often we only have access to a command line interface. This makes it important to get to know how to use a tool such as *tcpdump* as it is used via the command line and does not use many resources in terms of memory and processing power.
+
+In this example even though we have a remote desktop session and therefore access to a GUI we will begin with *tcpdump* to practise using it.
+
+>[!TIP]
+>We can *write* the output from *tcpdump* to a *.pcap* file so we can later analyze it in wireshark | possibly on our own local machine after transferring it across using ssh or ftp for example
+
+First of all we check which *network interfaces* we have available on the remote machine on the companys internal network using `ifconfig | grep -B1 "inet 172"`
+
+We use *172* because we are looking for interfaces on the subnet in our scope which is *172.168.5.0/23*. The first host can be found at *172.168.4.1* and the last at *172.16.5.254*
+
+>[!NOTE]
+>The -B1 option specifies to *grep* that we want it to return one line before it finds the string *inet 172* as well as the line with the string in it | this is so we can see the interface name which in this case is one line above the IPv4 address
+
+![ad1](/images/1.png)
+
+We next look at which interfaces are available to use *tcpdump* on using `sudo tcpdump -D`
+
+We see that the interface we want to listen on is *ens224*
+
+![ad2](/images/2.png)
+
+When we run *tcpdump* we specify that we want less data returned by using the `-q` flag since we are just looking for IP addresses at the moment. We write the output to a *.pcap* file using the `-w` flag: `sudo tcpdump -i ens224 -q -w data_1.pcap`
+
+![ad3](/images/3.png)
+
+>[!NOTE]
+>There is much more we can do with *tcpdump* | it is worth getting to know it better but here this will do to help us find IP addresses of hosts on the network
+
+After letting *tcpdump* run for a while we can stop it and start *wireshark* from the *terminal* using `sudo -E wireshark` | we then open the *data_1.pcap* file and take a look at its stats for a high level overview of the traffic on the network.
+
+![ad4](/images/4.png)
+
+![ad5](/images/5.png)
+
+When we use the *display filter* functionality in *wireshark* to filter for *arp* frames we start to see IP addresses of interest which we can note down somewhere.
+
+>[!NOTE]
+>Display filters are applied in wireshark and do not lose other types of data whereas *capture filters* are specified when wireshark starts and cause it to not capture other types of data at all
+
+![ad6](/images/6.png)
+
+#### Responder
+
+Another tool we can use is *responder* | this tool has lots of functionality and we will see how we can use it to attempt to capture hashes later but for now we are going to run it passively just to check out traffic on the network.
+
+We can use `sudo responder -I ens224 -A` and then look at the captured data for IP addresses we might not have found using *tcpdump* or *wireshark*
+
+![ad7](/images/7.png)
+
+![ad8](/images/8.png)
+
+### Active Scans
+
+Moving into the realm of *active* scanning where we interact with hosts on the network in different ways we can start by using *ICMP* requests and responses to find live hosts.
+
+>[!IMPORTANT]
+>ICMP traffic is frequently dropped so we cannot rely on it alone | we must combine ICMP scans with other methods such as listening to network traffic and half-open SYN scans with a tool such as *nmap*
+
+The *fping* tool is a good choice for checking for hosts using *icmp*
+
+We can use the `-a` flag to return *alive* hosts
+
+The `-s` flag gives us some useful *stats* at the end of the scan
+
+Using the `-g` flag *generates* a target list
+
+The `-q` flag gives us less data as we are just looking for IP addresses at the moment
+
+The final command is `sudo fping -asgq 172.16.5.0/23` and it shows us in this case that it can find *three* alive hosts though as mentioned earlier this needs to be treated cautiously as often *icmp* traffic is dropped so responses are not received even though there are live hosts on the network.
+
+![ad9](/images/9.png)
+
+#### Nmap
+
+The *nmap* tool is awesome | even Trinity uses it whilst fighting the matrix | but because it is awesome there is a lot to learn with it.
+
+This is one tool which is really worth learning in depth. Here we are merely scratching the surface but by doing so we are able to find useful information regarding the target domain and the hosts on it.
+
+There are many different types of scans we can perform using *nmap* and some are more noisy than others.
+
+The default scan is a half-open SYN scan | we call it *half-open* because a TCP *SYN* packet is sent to initiate a connection to services which might be running on ports but if a *SYN-ACK* response is received the connection is closed - no final *ACK* is sent - instead *nmap* sends a *RST* packet.
+
+The thinking here is that this is less noisy than a full TCP connection being established and this is true but it is still going to generate noise.
+
+We can specify the half-open syn scan using the `-sS` flag in our command.
+
+>[!NOTE]
+>In this next part of the repo we will be using various flags with our nmap commands - they are not going to be explained here since the focus is on ad enumeration and attacks but they can be researched - hopefully we will get an nmap repo up at some point
+
+We use `sudo nmap -Pn -n -sS --min-rate=250 172.16.5.0/23` to scan for live hosts which our earlier techniques might have missed.
+
+![ad10](/images/10.png)
+
+Once we have a list of targets we can put them into a *.txt* file which we can feed into our *nmap* scans using the `-iL` flag.
+
+In this example we use more aggressive scans with the `-sV` and `-A` flags.
+
+>[!CAUTION]
+>Make sure to take the time to understand the *nmap* scans you are using if pentesting an organization and check they are in scope and that the client is happy for them to be used against their networks as sometimes active vuln scans from nmap might cause instability or knock devices offline
+
+![ad11](/images/11.png)
+
+We use `sudo nmap -Pn -n -sV -A --min-rate=250 -iL targets.txt` to enumerate the targeted hosts more thoroughly.
+
+![ad12](/images/12.png)
+
+It is worth noting that generally we want to scan *all* tcp ports on a host to see if there are services listening on higher or non-default ports. We can specify all ports using `-p-`
+
+A command which uses some bashfu with our nmap scan to return just the port numbers of open tcp ports on a host from the entire port range is:
+
+`ports130=$(sudo nmap -n -Pn -p- --min-rate=250 -sS --open 172.16.5.130 | grep ^[0-9] | cut -d '/' -f 1 | tr '\n' ',' | sed s/,$//)`
+
+![ad13](/images/13.png)
+
+The returned port numbers are stored in a variable - in this case `$ports130` - which we can use in further scans or put into a *.txt* file.
+
+`sudo nmap -Pn -p$ports130 -sV -A -oA ports_130 172.16.5.130`
+
+![ad14](/images/14.png)
+
+>[!IMPORTANT]
+>It is best to save *nmap* scan results into files so we can look back over the returned data and feed it into other tools | the `-oA` flag saves the results in several useful formats
+
+By this point we have gained an initial understanding of the domain along with live hosts on it and potential vulnerabilities or attack paths via those hosts | the *nmap* scan results will show us versions of services and we might notice these are out of date and vulnerable to attack.
+
+>[!NOTE]
+>It might seem unlikely that we will find old versions of services or operating systems running but it does happen | some organizations continue to use out of date OS and services in their internal networks
+
+### User Enumeration
+
+Earlier we performed recon on external resources and hopefully created a list of possible users from employee data and perhaps old breach data. This data can be later used for attacks such as *password spraying*.
+
+Another way we can enumerate possible usernames is by using the *kerbrute* tool which takes advantage of kerberos pre-authentication requests. It is often the case that failed attempts will not end up in logs or alerts so we can brute force potential usernames looking for valid ones.
+
+>[!NOTE]
+>We are trying to ultimately get valid creds for a domain user | even a low privileged one will allow us to further enumerate AD | so we are trying to find usernames in this stage as they can then be used in credential attacks such as *password spraying*
+
+If we have created a possible username list from our external recon we can use this along with *kerbrute* but if not we can use a generic one such as *jsmith.txt* which can be found at [insidetrust](https://github.com/insidetrust/statistically-likely-usernames)
+
+In order to use *kerbrute* to enumerate valid AD usernames we need to know the *Domain Controller* and the *domain* which we have discovered via our earlier initial enumeration of the domain.
+
+In this example we found the *domain* name in the output of our *nmap* scans and the *Domain Controller* was found via *nmap* via its name and the fact that it had *port 88* open | this port is used for *kerberos* and if it is open it is a good indicator that we have found a dc
+
+`sudo kerbrute userenum -d INLANEFREIGHT.LOCAL --dc 172.168.5.5 jsmith.txt -o ad_users`
+
+![ad15](/images/15.png)
+
+We now have lots of valid usernames for the domain which we can use later in further attacks.
+
+For an example ctf box in which we use *kerbrute* please see our writeup of [vulnnet:roasted](https://github.com/puzz00/vuln-net-roasted-thm/blob/main/vuln-net-roasted-thm.md)
