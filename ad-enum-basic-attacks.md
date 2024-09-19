@@ -404,7 +404,7 @@ The *why* is easy - we are attempting to capture NTLMv2 hashes so we can crack t
 
 Let us know consider *how* this attack works.
 
->[IMPORTANT]
+>[!IMPORTANT]
 >Before continuing it makes sense to be familiar with how NT LAN Manager - NTLM - authentication works | this is covered in our [active-directory-introduction](https://github.com/puzz00/active-directory-introduction/blob/main/active-directory-introduction.md#nt-lan-manager) repo
 
 Link Local Multicast Name Resolution is a protocol which enables name resolution to take place on a local network if Domain Name Services do not work or are not used.
