@@ -455,7 +455,7 @@ Assuming our *responder* captures an ntlm hash we will see it displayed in our t
 Since we are trying to gain cleartext credentials for a domain user at this point, we can let responder run for quite some time whilst we are working on other tasks.
 
 >[!TIP]
->Setting up a responder when we first being testing an internal network is a good idea | this can be done early in the morning and or during lunch as there will be lots of traffic when users log on to the network
+>Setting up a responder when we first begin testing an internal network is a good idea | this can be done early in the morning and or during lunch as there will be lots of traffic when users log on to the network
 
 ###### Hash Cracking
 
