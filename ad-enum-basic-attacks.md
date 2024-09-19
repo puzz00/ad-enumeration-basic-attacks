@@ -277,6 +277,9 @@ Another tool we can use is *responder* | this tool has lots of functionality and
 
 We can use `sudo responder -I ens224 -A` and then look at the captured data for IP addresses we might not have found using *tcpdump* or *wireshark*
 
+>[!NOTE]
+>The `-A` flag runs *responder* in its *analyze* mode which means that we can see traffic but we are not poisoning anything
+
 ![ad7](/images/7.png)
 
 ![ad8](/images/8.png)
@@ -380,3 +383,98 @@ In this example we found the *domain* name in the output of our *nmap* scans and
 We now have lots of valid usernames for the domain which we can use later in further attacks.
 
 For an example ctf box in which we use *kerbrute* please see our writeup of [vulnnet:roasted](https://github.com/puzz00/vuln-net-roasted-thm/blob/main/vuln-net-roasted-thm.md)
+
+## Gaining a Foothold in the Domain
+
+We now have completed our initial enumeration of the domain. Our next step is to attempt to gain a foothold in it as this will let use further enumerate it and deepen our compromise of it.
+
+Essentialy, we are attempting to gain cleartext credentials of a domain user - even a low privileged user account will be sufficient at this point.
+
+In this section we will cover two common ways of achieving this foothold - poisoning network traffic with a *man-in-the-middle* attack and *password spraying*.
+
+### Link Local Multicast Name Resolution Poisoning
+
+Before we look at the specific commands involved in carrying out an LLMNR poisoning attack, it is worth our while to take the time to understand how it works at a high-level and why we carry it out.
+
+#### Why?
+
+The *why* is easy - we are attempting to capture NTLMv2 hashes so we can crack them offline and therefore obtain valid credentials for a domain user *or* pass them to other devices so we can impersonate the user we have captured the hash of. In this section we will focus on capturing the hashes in order to crack them and obtain cleartext credentials.
+
+#### How?
+
+Let us know consider *how* this attack works.
+
+>[IMPORTANT]
+>Before continuing it makes sense to be familiar with how NT LAN Manager - NTLM - authentication works | this is covered in our [active-directory-introduction](https://github.com/puzz00/active-directory-introduction/blob/main/active-directory-introduction.md#nt-lan-manager) repo
+
+Link Local Multicast Name Resolution is a protocol which enables name resolution to take place on a local network if Domain Name Services do not work or are not used.
+
+A device can send a broadcast (multicast) message to all the other devices on a subnet by using the broadcast address if DNS has failed.
+
+An example of this would be a user typing in `\\FileServer\Documents\account.docx` when they are trying to access a shared resource which is really named `\\FileServer\Documents\accounts.docx`
+
+DNS will fail to resolve this request so by default windows will fall back on LLMNR to attempt to resolve it.
+
+In our example, once DNS has failed, the host will send a multicast message to all the other devices which are on the same local network - link - as it. This message essentialy asks the other devices if they know where to find `\\FileServer\Documents\account.docx`
+
+This is where our attack comes in!
+
+As an attacker on the same local network as the victim host, we can listen for these messages and *respond* to them with a lie - we pretend that we are hosting the resource `\\FileServer\Documents\account.docx`
+
+At this point, we enter the NTLM authentication process and we - the attacker - are pretending to be the legitimate server. This is where we send a challenge including a nonce to the victim. As per normal NTLM authentication the victim then responds to this challenge by sending us an *authenticate* message which of course includes the username, domain name and most importantly for our attack their response to our challenge which is nothing less than an encrypted value which has been created using the nonce and *the users NTLM hash*!
+
+>[!NOTE]
+>The NTLM hash might be NTLMv1 but this is unlikely since it is not considered cryptographically secure so most of the time it will be NTLMv2
+
+At this point we have captured a domain users NTLMv2 hash and can proceed to the offline cracking part of the attack.
+
+##### Responder
+
+The *responder* tool we used earlier to sniff network traffic to passively enumerate the domain can be used to perform an LLMNR poisoning attack.
+
+Pentesting distros such as kali and parrot have *responder* built-in. Before using it, we need to check out which network interface we want to run it with by using the `ifconfig` command.
+
+We can run an llmnr poisoning attack using `sudo responder -I eth0` where the `-I` flag lets us specify the interface we want it to listen on.
+
+![ad16](/images/16.png)
+
+There are a number of other flags which can be used but we will not be going into these much at this point since the basic command is sufficient to get *responder* listening to network traffic and responding to events in order to force victim machines to send across their *NTLM* hashes.
+
+With that being said, two common flags are `-w` which starts a *WPAD* rogue server and `-f` which gets *responder* to try to *fingerprint* the victim hosts os and version.
+
+>[!TIP]
+>The `-w` flag can be useful as it captures *HTTP* requests sents by users running *IE* if it has *Auto Detect Settings* enabled
+
+Assuming our *responder* captures an ntlm hash we will see it displayed in our terminal window. The hash will be saved to a file for each host - these logs can be found at `/usr/share/responder/logs` and they take the format of `MODULE NAME - HASH TYPE - CLIENT IP.txt`
+
+>[!NOTE]
+>Each *NTLMv2* hash captured will be different even if they are for the same user on the same machine since a *timestamp* is included in the hash
+
+![ad17](/images/17.png)
+
+Since we are trying to gain cleartext credentials for a domain user at this point, we can let responder run for quite some time whilst we are working on other tasks.
+
+>[!TIP]
+>Setting up a responder when we first being testing an internal network is a good idea | this can be done early in the morning and or during lunch as there will be lots of traffic when users log on to the network
+
+###### Hash Cracking
+
+Once we have harvested some ntlm hashes it is time to attempt to crack them offline. We can use *hashcat* to do this along with either a custom wordlist generated for the specific organization we are targeting or a good generic one.
+
+We will need to use the *hashcat mode* of *5600* for cracking *NTLMv2* hashes which are the most common hash type to capture using this attack.
+
+>[!CAUTION]
+>*NTLMv2* hashes are *slow* to crack | be prepared for a long wait even if using a GPU based cracking rig | it can be practically impossible to crack them if strong passwords are used but we can generally rely on people being people and coming up with weak ones so it is worth giving it a go
+
+The basic syntax for running a cracking attempt on ntlmv2 hashes saved into one file called `hashes.txt` and using the `rockyou.txt` wordlist is as follows: `sudo hashcat -a 0 -m 5600 hashes.txt rockyou.txt -O`
+
+![ad18](/images/18.png)
+
+![ad19](/images/19.png)
+
+![ad20](/images/20.png)
+
+>[!IMPORTANT]
+>The `-a 0` option specifies that we want to use a basic *dictionary attack* as the *attack mode* and the `-O` flag *optimizes* the kernel for cracking which makes the attack much faster | please be aware that the `-O` flag is a good choice if we know or believe the passwords to be less than 31 characters but will miss things if they are greater than this because *hashcat* will limit the password length to 31 characters
+
+If we successfully crack even *one* hash we can use it to gain a foothold in the domain and this will enable us to deepen own compromise of it even all the way up to full pwnership - when hacking active directory environments it really is a case of a small key opening a big door :smiley: 
