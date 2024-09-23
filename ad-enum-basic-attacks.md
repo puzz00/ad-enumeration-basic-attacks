@@ -478,3 +478,364 @@ The basic syntax for running a cracking attempt on ntlmv2 hashes saved into one 
 >The `-a 0` option specifies that we want to use a basic *dictionary attack* as the *attack mode* and the `-O` flag *optimizes* the kernel for cracking which makes the attack much faster | please be aware that the `-O` flag is a good choice if we know or believe the passwords to be less than 31 characters but will miss things if they are greater than this because *hashcat* will limit the password length to 31 characters
 
 If we successfully crack even *one* hash we can use it to gain a foothold in the domain and this will enable us to deepen own compromise of it even all the way up to full pwnership - when hacking active directory environments it really is a case of a small key opening a big door :smiley: 
+
+### Password Spraying
+
+Password spraying is a technique we can use to gain initial access to an Active Directory (AD) environment by attempting to authenticate with commonly used passwords across many accounts. Unlike brute force attacks that try many passwords against a single account (often leading to account lockouts), password spraying involves using a limited set of weak or default passwords (e.g., "Password123", "Welcome1") across multiple accounts in a domain, reducing the risk of detection and account lockouts.
+
+We can try common weak passwords or create a custom list of possible passwords for the target organization.
+
+#### Why It’s Important
+
+Active Directory environments often contain hundreds or thousands of user accounts, and the likelihood that at least one user is using a weak or commonly used password is high. By exploiting this, we can gain access to valid user credentials, which may lead to privilege escalation or lateral movement within the network. Password spraying is particularly effective in organizations where users may not follow strong password policies.
+
+#### Considerations When Using Password Spraying
+
+1. **Avoiding Account Lockouts**: Most AD environments have account lockout policies that disable accounts after a certain number of failed login attempts. To avoid triggering these policies, we must limit the number of password attempts per account. For example, only one password attempt per account every few hours, depending on the domain's lockout policy, helps prevent raising suspicion.
+
+Here is a table that visualizes a password spraying attack across three usernames and three different commonly used weak passwords. The attacks are conducted in cycles, where each password is tried once against each username, followed by a delay to avoid triggering account lockouts. 
+
+| **Attack** | **Username**  | **Password**  |
+|------------|---------------|---------------|
+| **1**      | user1         | Password123   |
+| **1**      | user2         | Password123   |
+| **1**      | user3         | Password123   |
+| **--- (Delay between cycles) ---** |               |               |
+| **2**      | user1         | Welcome1      |
+| **2**      | user2         | Welcome1      |
+| **2**      | user3         | Welcome1      |
+| **--- (Delay between cycles) ---** |               |               |
+| **3**      | user1         | Summer2023    |
+| **3**      | user2         | Summer2023    |
+| **3**      | user3         | Summer2023    |
+
+##### Explanation
+
+**Attack 1**: The same password (`Password123`) is tested on all three usernames.
+**Attack 2**: After a delay to avoid lockouts, a new weak password (`Welcome1`) is tried against the same usernames.
+**Attack 3**: Another delay is introduced before trying the third password (`Summer2023`).
+
+This approach avoids account lockouts by ensuring that no account is repeatedly attacked with multiple passwords in a short time frame, which could trigger security mechanisms. Instead, a delay is introduced between attack cycles to minimize detection risk.
+   
+2. **Password Policy Enumeration**: Before conducting password spraying, it is critical to enumerate and understand the target’s password policies (e.g., account lockout thresholds, password complexity requirements). This information can be retrieved using tools like `ldapsearch` or `rpcclient`, or through manual methods by querying AD for policy details.
+
+>[!NOTE]
+>We will look more closely at enumerating password policies in our next section | Enumerating the Domain Password Policy
+
+3. **Username Enumeration**: A key prerequisite for password spraying is generating a valid list of usernames. These can be gathered through various means, including open-source intelligence (OSINT), LDAP queries, or sniffing traffic on the network. Accurate and thorough username lists improve the likelihood of a successful spray.
+
+>[!NOTE]
+>We will go into more depth on how to create target username lists in the Making a Target User List section
+
+4. **Monitoring Detection**: Password spraying can trigger alerts if network monitoring or logging solutions like SIEM (Security Information and Event Management) tools are in place. To remain stealthy, we can stagger our attempts over longer periods, use low-velocity spraying methods, and monitor failed attempts closely to ensure we do not exceed the lockout threshold.
+
+By using password spraying responsibly and understanding the environment’s security controls, we can increase our chances of a successful foothold without immediately being detected.
+
+### Enumerating the Domain Password Policy
+
+Understanding the domain’s password policy is critical in planning a password spraying attack. The password policy defines parameters such as minimum password length, complexity requirements, and account lockout thresholds, which directly influence how password spraying should be conducted.
+
+This section will show us different methods for enumerating the domain password policy, both from *authenticated* and *unauthenticated* perspectives, across different platforms - linux and windows.
+
+---
+
+#### 1. **Enumerating Password Policy Remotely with Credentials**
+When we have valid credentials, we can use tools like `crackmapexec` or `rpcclient` to remotely query the password policy of the domain.
+
+##### **Using CrackMapExec**
+`CrackMapExec` (CME) is a versatile tool that can be used to query Active Directory information, including password policies.
+
+```bash
+sudo crackmapexec smb <target_IP> -u <username> -p <password> --pass-pol
+```
+- `-u`: Specifies the username.
+- `-p`: Specifies the password.
+- `--pass-pol`: Retrieves the domain password policy.
+
+Example:
+```bash
+sudo crackmapexec smb 192.168.1.100 -u admin -p password123 --pass-pol
+```
+Output example:
+```
+Password Policy:
+  - Minimum Password Length: 8
+  - Lockout Threshold: 5 attempts
+  - Lockout Duration: 30 minutes
+```
+
+##### **Using rpcclient**
+`rpcclient` is part of the `samba` suite and allows querying remote systems using MSRPC.
+
+```bash
+sudo rpcclient -U "<username>%<password>" <target_IP> -c 'getdompwinfo'
+```
+Example:
+```bash
+sudo rpcclient -U "admin%password123" 192.168.1.100 -c 'getdompwinfo'
+```
+Output:
+```
+Minimum password length: 8
+Password history length: 24
+Password complexity: on
+Lockout threshold: 5 attempts
+```
+
+---
+
+#### 2. **Enumerating Password Policy without Credentials via SMB Null Session**
+
+In environments where credentials are unavailable, we can try using smb null session attacks to retrieve the password policy using tools like `rpcclient`, `enum4linux`, and `enum4linux-ng`.
+
+>[!NOTE]
+>An SMB null session attack leverages the ability to connect to a Windows system's SMB service (Server Message Block) *without providing credentials* | In certain configurations, Windows allows *unauthenticated* users to establish a *null session* granting limited access to shared resources and certain information, such as the *domain password policy*, user lists, and other system details | We can exploit this weakness to enumerate valuable domain information without needing valid credentials
+
+##### **Using rpcclient (Null Session)**
+A null session can be established by omitting the username and password in `rpcclient`.
+
+>[!NOTE]
+>The `-N` flag specifies that there is to be *no* password used
+
+```bash
+sudo rpcclient -U "" <target_IP> -N -c 'getdompwinfo'
+```
+Example:
+```bash
+sudo rpcclient -U "" 192.168.1.100 -N -c 'getdompwinfo'
+```
+
+We can also connect to a null session using `rpcclient` and then issue the `getdompwinfo` command from inside it.
+
+![ad25](/images/25.png)
+
+##### **Using enum4linux**
+`enum4linux` is a tool that can enumerate information from SMB servers, including password policies, via null sessions.
+
+```bash
+sudo enum4linux -P <target_IP>
+```
+
+```
+Password Info for Domain <DOMAIN>
+  Minimum password length: 8
+  Lockout threshold: 5 attempts
+  Lockout duration: 30 minutes
+```
+
+>[!NOTE]
+>The `-P` flag specifies that we want the domain password policy
+
+![ad26](/images/26.png)
+
+![ad27](/images/27.png)
+
+##### **Using enum4linux-ng**
+`enum4linux-ng` is a modern re-implementation of `enum4linux`, providing a cleaner interface and the ability to output the data to useful formats such as `json` and `yaml`.
+
+```bash
+sudo enum4linux-ng -P <target_IP> -oA pPolicy
+```
+
+![ad28](/images/28.png)
+
+![ad29](/images/29.png)
+
+##### **Using crackmapexed**
+As well as using credentials with `crackmapexec` we can try it with a null session if they are allowed.
+
+```bash
+sudo crackmapexec smb <target_IP> -u "" --pass-pol
+```
+
+![ad30](/images/30.png)
+
+##### **Using Null Session on a Windows Attack Machine**
+From a Windows machine, we can establish a null session using the `net use` command and then enumerate the password policy using `rpcclient`.
+
+```batch
+net use \\<target_IP>\IPC$ "" /user:""
+rpcclient -U "" <target_IP> -N -c 'getdompwinfo'
+```
+
+---
+
+#### 3. **Enumerating Password Policy via LDAP Anonymous Bind**
+
+Some AD environments allow anonymous LDAP queries, which can be used to retrieve domain password policies.
+
+>[!TIP]
+>Please see our [introduction to active directory](https://github.com/puzz00/active-directory-introduction/blob/main/active-directory-introduction.md#lightweight-directory-access-protocol) repo for a brief overview of LDAP
+
+##### **Enumerating ldap**
+We will need to know if *anonymous* binds to ldap are allowed - this can be done via an nmap *script* called *ldap-rootdse* which will give us useful data if ldap anonymous binds are allowed.
+
+In this data we will hopefully see the *base distinguished name* which is needed when attempting to enumerate the domain password policy via an ldap anonymous bind with `ldapsearch`
+
+>[!NOTE]
+>The **Base Distinguished Name (Base DN)** is a starting point in the directory structure of an LDAP (Lightweight Directory Access Protocol) server from which the search operation begins - it represents the root of the LDAP directory tree and is essential for targeting the correct domain during enumeration.
+
+>[!IMPORTANT]
+>When using tools like `ldapsearch` to query a domain's password policy - the Base DN specifies the domain’s structure | For example if your domain is `example.com` the Base DN would be `DC=example,DC=com` | This ensures the search is conducted within the correct part of the Active Directory hierarchy
+
+The `nmap` command to use is `sudo nmap -Pn -n -p389,636 --script ldap-rootsde <TARGET-IP>`
+
+![ad22](/images/22.png)
+
+We can actually find the base DN using `ldapsearch` if anonymous ldap binds are allowed.
+
+`sudo ldapsearch -x -h <TARGET-IP> -s base -b "" namingContexts`
+
+Here is an explanation of each part of the command:
+
+- **`ldapsearch`**: This is the command-line tool used to query LDAP (Lightweight Directory Access Protocol) servers. It allows you to search and retrieve information from a directory.
+
+- **`-x`**: This flag tells `ldapsearch` to use **simple authentication** (as opposed to SASL, a more complex and secure authentication mechanism). In most cases, this is used for unauthenticated or basic LDAP queries.
+
+- **`-h <TARGET-IP>`**: Specifies the **hostname** or **IP address** of the target LDAP server. Replace `<TARGET-IP>` with the actual IP of the server we are querying.
+
+- **`-s base`**: Defines the **scope** of the search as "base." This means that the search will be limited to the base object itself (i.e., it won't search recursively through subdirectories). This scope is useful when retrieving specific attributes of the root entry.
+
+- **`-b ""`**: Specifies the **Base DN (Distinguished Name)** as an empty string. When the Base DN is empty, the query is directed at the **rootDSE** (Root Directory Service Entry), which provides information about the LDAP server’s configuration and capabilities without needing credentials.
+
+- **`namingContexts`**: This is the **attribute** we are querying. The `namingContexts` attribute contains the list of base DNs available on the LDAP server. These are the different directory partitions, such as the domain's directory or configuration partitions.
+
+###### Summary
+This command queries the root of the LDAP directory on the target IP for the `namingContexts` attribute, which provides a list of directory partitions (base DNs). This information is essential for knowing where to start other LDAP searches, such as retrieving the domain's password policy.
+
+![ad23](/images/23.png)
+
+##### **Using ldapsearch**
+`ldapsearch` can be used to query LDAP servers for password policy information if anonymous binds are allowed.
+
+```bash
+sudo ldapsearch -x -h 192.168.1.100 -b "DC=EXAMPLE,DC=COM" -s sub "(objectClass=domain)" | grep -i -E "pwd|lockout"
+```
+
+Here’s an explanation of the command:
+
+- **`sudo`**: Runs the command with elevated privileges, which may be required to execute `ldapsearch` depending on the system's permissions.
+
+- **`ldapsearch`**: The command-line tool used to query LDAP (Lightweight Directory Access Protocol) directories.
+
+- **`-x`**: Specifies **simple authentication** (i.e., no SASL) for the LDAP query. This is commonly used for unauthenticated or basic searches.
+
+- **`-h 192.168.1.100`**: Specifies the **hostname** or **IP address** of the LDAP server you're querying. In this case, the server is located at IP `192.168.1.100`.
+
+- **`-b "DC=EXAMPLE,DC=COM"`**: Defines the **Base DN (Distinguished Name)** from which the search begins. In this case, it’s the root of the domain `example.com`. 
+  - `DC=EXAMPLE`: Represents the domain component `EXAMPLE`.
+  - `DC=COM`: Represents the domain component `COM`.
+  
+  Together, `DC=EXAMPLE,DC=COM` points to the base of the directory for `example.com`.
+
+- **`-s sub`**: Specifies the **scope** of the LDAP search as "subtree." This means that the search will be conducted recursively from the base DN down through all subdirectories. 
+
+- **`"(objectClass=domain)"`**: This is the **filter** used to narrow the LDAP search. In this case, it retrieves objects where the **objectClass** is `domain`. This typically returns domain-related information.
+
+- **`| grep -i -E "pwd|lockout"`**: This pipes the output of `ldapsearch` to `grep` for further filtering.
+  - `grep`: Searches the output for specific patterns.
+  - `-i`: Makes the search case-insensitive.
+  - `-E`: Enables extended regular expressions in `grep` to match multiple patterns.
+  - `"pwd|lockout"`: These are the patterns being searched for in the LDAP results. `grep` will return lines containing either "pwd" (related to password policies) or "lockout" (related to account lockout settings).
+
+###### What This Command Does:
+This command queries an LDAP server at IP `192.168.1.100`, starting at the domain `EXAMPLE.COM` (as specified by the Base DN), searching for entries of `objectClass=domain`. It retrieves password policy information by filtering for attributes related to passwords (`pwd`) and account lockouts (`lockout`), such as maximum password age, password complexity requirements, and lockout thresholds.
+
+The use of `grep` ensures only relevant information about passwords and lockouts is shown, making the output easier to analyze.
+
+![ad24](/images/24.png)
+
+>[!TIP]
+>The `lockoutDuration` is shown in windows FILETIME so to convert it to minutes we can make it positive and then use: `18_000_000_000 / 10_000_000 / 60` to get the duration in minutes
+
+##### **Using Windapsearch.py**
+`windapsearch.py` is a Python script for querying LDAP anonymously.
+
+```bash
+python3 windapsearch.py --dc-ip <target_IP> --domain <domain> --anonymous
+```
+
+Example:
+```bash
+python3 windapsearch.py --dc-ip 192.168.1.100 --domain example.com --anonymous
+```
+
+---
+
+#### 4. **Enumerating Password Policy from an Authenticated Windows Machine**
+
+If you have access to a Windows machine authenticated to the domain, you can use the `net` command or `PowerView` - a part of [PowerSploit](https://github.com/PowerShellMafia/PowerSploit/tree/master) to enumerate the password policy.
+
+##### **Using the net Command**
+The `net accounts` command can retrieve password policy details.
+
+```cmd
+net accounts /domain
+```
+
+Example output:
+```
+Minimum password length: 8
+Maximum password age: 42 days
+Lockout threshold: 5 invalid logon attempts
+```
+
+##### **Using PowerView**
+`PowerView` is a PowerShell tool for domain enumeration, including querying password policies.
+
+```powershell
+Import-Module .\PowerView.ps1
+Get-DomainPolicy | Select-Object -ExpandProperty systemaccess
+```
+Example output:
+```
+MinimumPasswordLength : 8
+PasswordHistoryLength : 24
+LockoutThreshold : 5
+```
+
+#### Analyzing and Understanding the Password Policy
+
+Once the password policy is retrieved, it's essential to understand its components, as they directly impact password spraying strategy:
+
+1. **Minimum Password Length**: Defines the shortest allowed password. If it’s low (e.g., 6-8 characters), it’s likely that weak passwords are in use.
+
+>[!NOTE]
+>8 is still common but we are seeing more organizations forcing their employees to use 10 to 14 characters | this does not stop password spraying from working however - a long bad password is still a bad password - something like `Password123!` or `Summer2023!` for example
+   
+2. **Password Complexity**: If complexity is enabled - indicated by a value of 1 - passwords must include characters from at least three categories (uppercase, lowercase, numbers, symbols). This is intended to make the passwords more secure but it should be noted that users can satisfy these rules and still have weak passwords such as `Password1!` or `Welcome123!`.
+   
+3. **Lockout Threshold**: Indicates how many failed login attempts are allowed before an account is locked. The smaller the threshold, the more careful an attacker must be when spraying passwords (e.g., one attempt per account per 30 minutes).
+
+>[!TIP]
+>When enumerating usernames for a target list if we use `crackmapexec` we can see how many bad password attempts each user is on | this will be detailed in the next section on Making a Target User List
+
+4. **Lockout Duration**: Specifies how long an account remains locked after exceeding the threshold. Short lockout durations make repeated spraying easier, while long durations can alert administrators to ongoing attacks - sometimes admin have to manually unlock every locked account, and they will never thank us for that.
+
+>[!IMPORTANT]
+>We *NEVER* want to lock accounts when performing a pentest - it is some very bad juju - a very nasty booboo
+
+5. **Password History**: If password history enforcement is in place, users cannot reuse recent passwords. This forces users to regularly change their passwords, which can help us because it tends to lead to more simple passwords being chosen.
+
+##### **Default Domain Password Policy**
+
+Here's a table detailing the default domain password policy settings typically created when a new Active Directory domain is set up. These settings may vary slightly depending on the version of Windows Server, but the following is common for Windows Server environments:
+
+| **Policy Setting**                  | **Default Value**                     | **Description**                                                                                             |
+|-------------------------------------|---------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| **Maximum Password Age**            | 42 days                               | The maximum number of days that a password can be used before it must be changed.                           |
+| **Minimum Password Age**            | 1 day                                 | The minimum number of days a user must wait before they can change their password.                          |
+| **Minimum Password Length**         | 7 characters                          | The minimum number of characters required in a password.                                                   |
+| **Password Complexity Requirement** | Enabled                               | Passwords must meet complexity requirements: must contain at least three of the following: uppercase letters, lowercase letters, digits, and special characters. |
+| **Store Passwords Using Reversible Encryption** | Disabled                 | Passwords are not stored in a way that allows them to be retrieved in plain text.                          |
+| **Account Lockout Duration**       | 0 (no lockout)                        | By default, accounts are not locked out after a certain number of failed login attempts.                    |
+| **Account Lockout Threshold**      | 0 (no threshold)                      | By default, there is no threshold for failed login attempts that would trigger an account lockout.          |
+| **Reset Account Lockout Counter After** | 0 minutes                        | Not applicable when account lockout is not enabled.                                                         |
+
+###### Notes:
+- The settings for **Account Lockout Duration** and **Account Lockout Threshold** may not be configured by default, meaning users will not be locked out after failed attempts unless the policy is explicitly set.
+
+- There are a fair few organizations out there that never actually change this default policy | still we should do our best to enumerate the policy for each domain we test since we do not want to assume it has not been changed
+
+>[!CAUTION]
+>As a final reminder - we said it before and we'll say it again - don't be the :horse: :hole: who locks out hundreds or thousands of accounts!
