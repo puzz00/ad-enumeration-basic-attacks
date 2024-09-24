@@ -839,3 +839,160 @@ Here's a table detailing the default domain password policy settings typically c
 
 >[!CAUTION]
 >As a final reminder - we said it before and we'll say it again - don't be the :horse: :hole: who locks out hundreds or thousands of accounts!
+
+### Making a Target User List
+
+We need to enumerate valid usernames to create a target list for attacks like password spraying. This section outlines several techniques to enumerate domain usernames using **SMB null sessions**, **LDAP anonymous binds**, and **Kerberos brute-forcing**. These methods range from unauthenticated techniques to credentialed enumeration, each with its own advantages and limitations.
+
+---
+
+#### 1. **SMB Null Sessions**
+As already mentioned, SMB null sessions allow for unauthenticated access to network shares and user lists in certain misconfigured Windows environments.
+
+##### a) **Using `enum4linux` (Legacy)**
+`enum4linux` is an older tool designed to gather information from Windows machines using SMB. 
+
+**Command:**
+```bash
+sudo enum4linux -U <TARGET-IP>
+```
+- `-U`: Enumerates users on the target system.
+- **Example Output**: Displays a list of usernames if the SMB server allows null session enumeration.
+
+We can clean up the output so the usernames can be put into a .txt file to use in password spraying attacks using:
+
+`sudo enum4linux -U <TARGET-IP> | grep "user:" | cut -f2 -d"[" | cut -f1 -d"]"`
+
+![ad32](/images/32.png)
+
+##### b) **Using `enum4linux-ng`**
+`enum4linux-ng` is a modern version of the tool with additional features and more reliable outputs.
+
+**Command:**
+```bash
+enum4linux-ng -A <TARGET-IP>
+```
+- `-A`: Aggressively enumerate users, shares, and more.
+
+##### c) **Using `rpcclient`**
+`rpcclient` allows interaction with Windows SMB and can be used to enumerate users via an SMB null session.
+
+**Command:**
+```bash
+sudo rpcclient -U "" -N <TARGET-IP>
+> enumdomusers
+```
+- The `-U ""` flag opens a null session (no credentials).
+- The `-N` flag specifies to use no password.
+- `enumdomusers`: Lists all domain users.
+
+![ad33](/images/33.png)
+
+##### d) **Using `crackmapexec` (CME)**
+`crackmapexec` can also be used to enumerate users with null sessions.
+
+**Command:**
+```bash
+crackmapexec smb <TARGET-IP> --users
+```
+- `--users`: Retrieves the list of users from the domain.
+
+>[!NOTE]
+>We can see the bad password count when using `crackmapexec` which helps us better target our attack to avoid locking out accounts
+
+![ad34](/images/34.png)
+
+---
+
+#### 2. **Enumerating Users with LDAP Anonymous Binds**
+LDAP (Lightweight Directory Access Protocol) allows querying Active Directory for various information, including user accounts. If LDAP allows anonymous binding, we can enumerate users.
+
+##### a) **Using `ldapsearch`**
+`ldapsearch` is a command-line tool for querying LDAP directories, including AD.
+
+**Command:**
+```bash
+sudo ldapsearch -x -h <TARGET-IP> -b "DC=EXAMPLE,DC=COM" -s sub "(objectClass=user)" | grep sAMAccountName: | cut -f2 -d " "
+```
+- `-x`: Simple authentication (no credentials).
+- `-h <TARGET-IP>`: Target IP address of the domain controller.
+- `-b "DC=EXAMPLE,DC=COM"`: Base distinguished name (replace with actual domain).
+- `(objectClass=user)`: Filter for user objects.
+- `sAMAccountName`: Returns the username field.
+
+![ad35](/images/35.png)
+
+##### b) **Using `windapsearch.py`**
+`windapsearch.py` is a Python script to perform LDAP enumeration.
+
+**Command:**
+```bash
+sudo python3 windapsearch.py --dc-ip <TARGET-IP> -u "" -U
+```
+- `-u ""`: Specifies a null session.
+- `-U`: User enumeration mode.
+- **Example Output**: Displays domain usernames.
+
+![ad36](/images/36.png)
+
+---
+
+#### 3. **Using Kerbrute for User Enumeration**
+`kerbrute` is a tool used to enumerate valid domain usernames by attempting to brute force usernames over Kerberos pre-authentication. It is a stealthier option compared to SMB or LDAP as it avoids generating Windows Event ID 4625 (failed login attempts).
+
+##### Why `kerbrute` is Preferred:
+- **Stealthy**: Kerberos pre-authentication failures do not trigger **Event ID 4625**, unlike failed SMB or LDAP authentications.
+- **No account lockouts**: Only invalid usernames trigger errors, avoiding user account lockouts.
+- **High-speed enumeration**: Efficient for large user lists.
+
+##### How `kerbrute` Works:
+`kerbrute` attempts Kerberos pre-authentication requests for each username. If a username is valid, the server responds with a pre-authentication required message; invalid usernames return a "principal unknown" error.
+
+>[!NOTE]
+> Kerberos pre-authentication is a security feature designed to prevent offline password-guessing attacks | When a user attempts to authenticate, their encrypted timestamp (created using their password) is sent to the Domain Controller (DC) | If pre-authentication is enabled, the DC verifies this timestamp before responding
+
+##### Example `kerbrute` Command:
+```bash
+sudo kerbrute userenum -d example.com --dc <TARGET-IP> jsmith.txt
+```
+- `-d example.com`: The target domain.
+- `--dc <TARGET-IP>`: The IP address of the domain controller.
+- `jsmith.txt`: The file containing a list of potential usernames to test.
+
+##### Output:
+The command returns a list of valid usernames based on the response from the domain controller.
+
+>[!NOTE]
+>Kerbrute will also show us accounts which do not have pre-authentication enabled - these accounts can be attacked via an *as-rep roast* in which the tgt response is cracked offline
+
+![ad31](/images/31.png)
+
+---
+
+#### 4. **Credentialed Enumeration with `crackmapexec`**
+If valid credentials are available, `crackmapexec` can enumerate users.
+
+##### Command:
+```bash
+crackmapexec smb <TARGET-IP> -u <USERNAME> -p <PASSWORD> --users
+```
+- `-u <USERNAME>`: The username for authentication.
+- `-p <PASSWORD>`: The associated password.
+- `--users`: Retrieves a list of domain users.
+
+![ad37](/images/37.png)
+
+---
+
+#### 5. **Using the `Get-AdUser` PowerShell Command (Credentialed)**
+If we have access to a Windows machine within the domain and appropriate permissions, we can use PowerShell to query AD for user information.
+
+##### Example Command:
+```powershell
+Get-AdUser -Filter * -Property SamAccountName | Select-Object SamAccountName
+```
+- `-Filter *`: Retrieves all users.
+- `-Property SamAccountName`: Specifies the property to retrieve (usernames).
+- This requires domain-joined credentials but offers detailed information, including additional properties if needed.
+
+---
