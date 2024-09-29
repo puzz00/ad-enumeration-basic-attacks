@@ -1081,7 +1081,8 @@ Responsible password spraying involves taking precautions to avoid detection and
 
 This ensures that each account has time to reset its counter if our attempts are unsuccessful, keeping our attack below the lockout threshold.
 
-Yes, the **observation window** in password spraying is the same as the **"Reset account lockout counter after"** setting found in the domains password policy.
+>[!NOTE]
+>Yes, the **observation window** in password spraying is the same as the **"Reset account lockout counter after"** setting found in the domains password policy :thumbsup:
 
 ### Responsible Password Spraying Example in Practice
 Let us say during our enumeration we discover the following password policy:
