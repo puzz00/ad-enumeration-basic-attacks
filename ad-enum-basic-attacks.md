@@ -1092,7 +1092,7 @@ Let us say during our enumeration we discover the following password policy:
 
 In this scenario:
 
-- The **observation window** is 60 minutes. If we have 3 failed attempts within these 30 minutes, the account is locked - bad juju :face_palm: 
+- The **observation window** is 60 minutes. If we have 3 failed attempts within these 30 minutes, the account is locked - bad juju :facepalm: 
 - After 60 minutes pass without 3 consecutive failed attempts, the counter resets to 0, and we can safely retry without triggering a lockout - good juju :smiling_imp: 
 
 In short, we need to tailor our attacks to the context of the domain password policy of the organization we are targetting.
