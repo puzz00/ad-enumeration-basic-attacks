@@ -1084,7 +1084,7 @@ This ensures that each account has time to reset its counter if our attempts are
 >[!NOTE]
 >Yes, the **observation window** in password spraying is the same as the **"Reset account lockout counter after"** setting found in the domains password policy :thumbsup:
 
-### Responsible Password Spraying Example in Practice
+#### Responsible Password Spraying Example in Practice
 Let us say during our enumeration we discover the following password policy:
 
 - **Account Lockout Threshold**: 3 failed attempts.
@@ -1104,11 +1104,11 @@ When pentesting time is of the essence - we need to be working on other areas of
 
 Here we will look at a simple bash script that automates a password spraying attack using a given list of usernames and passwords. This script uses `rpcclient` to perform the spraying, includes a delay between each password attempt to avoid lockouts, and saves the successful logins to a separate file.
 
-### Prerequisites
+#### Prerequisites
 1. Create a file named `userlist.txt` containing usernames (one username per line).
 2. Create a file named `passwordlist.txt` containing the passwords to spray (one password per line).
 
-### Bash Script: `password_spray.sh`
+#### Bash Script: `password_spray.sh`
 ```bash!
 #!/bin/bash
 
@@ -1157,7 +1157,7 @@ while IFS= read -r password; do
 done < "$passwordlist"
 ```
 
-### Script Explanation:
+#### Script Explanation:
 - **Variables Defined at the Top**:
   - `target_ip`: IP address of the target domain controller.
   - `userlist`: File containing usernames to spray (e.g., `userlist.txt`).
@@ -1173,7 +1173,7 @@ done < "$passwordlist"
 - **Delay Between Sprays**:
   - After each password is tried, the script waits for a delay period (`sleep "$delay"`) to avoid triggering account lockouts.
 
-### Example Usage:
+#### Example Usage:
 1. Save the above script to a file named `password_spray.sh`.
 2. Give execution permissions:
 
@@ -1195,14 +1195,78 @@ done < "$passwordlist"
 
 ![ad47](/images/47.png)
 
-### Things to Consider:
+#### Things to Consider:
 - **Account Lockout Policy**: Adjust the delay (`delay=1800`) as necessary, based on our understanding of the domain's account lockout policy.
 - **Output Analysis**: The script saves the output to `successful_attempts.txt`, making it easier to track which passwords successfully authenticated.
 
-### Potential Customization:
+#### Potential Customization:
 - Use a different tool for the actual password spray.
 - Modify the delay time based on the lockout policy.
 - Adjust the script to include other options, such as targeting specific hosts in a subnet.
 - Add multi-threading or parallel execution if necessary, though this should be used cautiously to avoid noise.
 
 [This script](/scripts/password_spray.sh) provides a straightforward way to automate internal password spraying attacks with responsible delays built in to minimize account lockouts.
+
+### Internal Password Sparaying from Windows
+
+Sometimes we will need to perform password spraying attacks from a windows machine - we might be authenticated to the domain but we can also be unauthenticated.
+
+Organizations might want us to conduct internal spraying from a domain-joined machine for the following reasons:
+
+1. **Mimicking Real-World Attacks**: Attackers often compromise internal machines and use these as a base for lateral movement or password spraying attacks. Spraying from a legitimate domain machine helps assess the organization's detection capabilities against internal threats.
+   
+2. **Reduced Visibility for Network Defenses**: Password spraying from a legitimate Windows machine within the network can bypass some external network monitoring and firewall rules. Tools like `DomainPasswordSpray.ps1` are specifically designed to leverage native Windows protocols, making detection and correlation more challenging.
+
+3. **Assess Internal Account Lockout and Password Policies**: Spraying from a domain-joined machine helps validate whether the password policy and account lockout settings are effective when subjected to internal password spraying attacks.
+
+4. **Bypass Conditional Access Policies**: Many organizations implement conditional access policies that restrict access to specific systems based on the source of the connection. Performing a spray from within the internal network can bypass these restrictions.
+
+### Using the `DomainPasswordSpray.ps1` Script
+
+The `DomainPasswordSpray.ps1` PowerShell script is a lightweight tool designed for password spraying attacks on a Windows environment. This script is a great choice for internal testing because it can be run from a standard Windows workstation or server and uses native Windows PowerShell capabilities.
+
+We can download the script from its [GitHub repository](https://github.com/dafthack/DomainPasswordSpray).
+
+#### Installation
+
+1. Clone or download the `DomainPasswordSpray.ps1` script to the local Windows machine.
+2. Ensure we have the necessary permissions to run unsigned scripts:
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   ```
+3. Run the script with the appropriate parameters as outlined below.
+
+### Common Usage Scenarios
+
+#### 1. **Unauthenticated Spray (With a Provided User List)**:
+If running without credentials, the script requires a manually specified user list with the `-UserList` flag. This method is useful when no domain credentials are available or when testing with a predefined list of targets.
+
+>[!NOTE]
+>We need to make sure we are in the same directory as the `DomainPasswordSpray.ps1` script for these commands to work
+
+**Example Command**:
+```powershell
+Import-Module .\DomainPasswordSpray.ps1
+Invoke-DomainPasswordSpray -Domain inlanefreight.local -UserList "C:\Tools\users.txt" -Password "Winter2022" -OutFile success -ErrorAction SilentlyContinue 
+```
+
+![ad50](/images/50.png)
+
+**Advantages**: Running the spray without authenticating as a domain user is stealthier in some cases, as it might blend in better with external traffic.
+
+#### 2. **Authenticated Spray (Automatically Gathers Users via LDAP)**:
+If running from a domain-joined machine or if valid credentials are available, the script can be used in an authenticated mode to pull the list of users automatically using LDAP queries - we can omit the `-UserList` flag.
+
+**Example Command**:
+```powershell
+Import-Module .\DomainPasswordSpray.ps1
+Invoke-DomainPasswordSpray -Domain inlanefreight.local -Password "Winter2022" -OutFile success -ErrorAction SilentlyContinue
+```
+
+![ad51](/images/51.png)
+
+### Conclusion
+The `DomainPasswordSpray.ps1` script is a powerful option for conducting password spraying from an internal Windows machine, especially in environments where running the attack from Linux is not feasible or would be too noisy.
+
+### Summary
+Password spraying is a powerful technique, but care must be taken to avoid locking out legitimate user accounts and triggering alerts. By combining the use of tools with responsible spraying tactics, we can enumerate valid credentials to use for further enumeration and compromise of the target domain while minimizing risk.
