@@ -1270,3 +1270,42 @@ The `DomainPasswordSpray.ps1` script is a powerful option for conducting passwor
 
 ### Summary
 Password spraying is a powerful technique, but care must be taken to avoid locking out legitimate user accounts and triggering alerts. By combining the use of tools with responsible spraying tactics, we can enumerate valid credentials to use for further enumeration and compromise of the target domain while minimizing risk.
+
+### Password Spraying Beyond Active Directory: Targeting Other Applications
+
+Password spraying is not just limited to attacking domain user accounts. It's a versatile attack method that can be effectively used against a wide range of services and applications that require authentication. By spraying commonly used passwords, we can target various entry points within an organization's network, potentially gaining access to sensitive data, administrative portals, or even compromising the entire infrastructure.
+
+#### Common Targets for Password Spraying Attacks
+When we perform password spraying, we typically focus on login portals and services that are widely used and may not have been configured with proper rate-limiting or account lockout settings. Some of our common targets include:
+
+1. **Web-Based Login Portals**:
+   - **Outlook Web Access (OWA)**: Exchange email services often expose OWA to the internet. We can frequently target this due to its prevalence in organizations and the value of accessing corporate email.
+   - **VPN Login Pages**: VPN portals are another great target, as compromising one can provide direct internal access to the network.
+   - **Microsoft 365 / Office 365**: Microsoft’s cloud suite is a *high-priority target* because compromising one account often allows access to SharePoint, Teams, OneDrive, and other services.
+   - **Azure AD Sign-In Pages**: Organizations using Azure Active Directory are vulnerable to password spraying against their cloud-based login pages.
+   - **Single Sign-On (SSO) Platforms**: Platforms like Okta, Ping Identity, and ADFS (Active Directory Federation Services) provide us with a valuable target since compromising a single SSO account can allow access to numerous services.
+
+2. **Remote Access Services**:
+   - **Remote Desktop Protocol (RDP)**: If exposed, RDP services can be sprayed to gain access to internal machines.
+   - **SSH Services**: Password spraying against SSH, especially with weak or default credentials, is a good tactic against Linux servers.
+   - **Citrix Gateways**: Widely used for remote access, Citrix environments are attractive targets for password spraying.
+
+3. **Web Applications with Login Functionality**:
+   - **Content Management Systems (CMS)**: Applications like WordPress, Joomla, and Drupal often have admin portals that we can target with password spraying.
+   - **HR and Payroll Systems**: Systems like Workday or ADP are targeted because of their high-value data and the sensitive information they hold.
+   - **CRM Platforms**: Salesforce and similar platforms contain business-critical information that could be exploited.
+
+4. **Network Devices and Management Consoles**:
+   - **Firewalls and Routers**: Default or weak passwords on management portals for firewalls, routers, and switches can allow us to modify network configurations.
+   - **Hypervisors and Management Servers**: VMware ESXi and other hypervisor management interfaces are common targets, as gaining access can lead to full control of virtualized environments.
+
+### Best Practices to Mitigate Password Spraying Against These Targets
+Organizations should adopt a layered approach to protect against password spraying attacks across these common targets:
+
+- **Implement Multi-Factor Authentication (MFA)**: Applying MFA wherever possible can prevent attackers from successfully logging in, even if they obtain valid credentials.
+- **Rate Limiting and Account Lockout Policies**: Set up rate-limiting and lockout policies on all externally accessible services to make spraying impractical.
+- **Use Strong Password Policies**: Enforce complex and unique passwords that are resistant to guessing attacks.
+- **Monitor for Failed Login Attempts**: Regularly review logs for patterns indicative of password spraying, such as multiple failed logins against different accounts within a short time.
+
+### Down the :rabbit: Hole: Using Valid AD Credentials
+Now that we have obtained valid credentials through our password spraying efforts, we can proceed to further enumerate the domain. In the next sections, we will explore how to use these credentials to query Active Directory for additional information, discover sensitive assets, and identify potential pathways for lateral and vertical movement :smiley:
