@@ -1309,3 +1309,117 @@ Organizations should adopt a layered approach to protect against password sprayi
 
 ### Down the :rabbit: Hole: Using Valid AD Credentials
 Now that we have obtained valid credentials through our password spraying efforts, we can proceed to further enumerate the domain. In the next sections, we will explore how to use these credentials to query Active Directory for additional information, discover sensitive assets, and identify potential pathways for lateral and vertical movement :smiley:
+
+## Digging Deeper | Enumerating AD with Credentials
+
+We now begin to work on further compromising the domain. As with most things, pentesting AD is cyclical - we will need to perform enumeration which will in turn help us to launch more attacks and move laterly and verticaly.
+
+### Security Controls | An Overview
+
+It is worth noting that we will run up against security controls when we are attacking organizations. Whilst it is possible to bypass these, we will not be going into such detail here as it is a large area and not the focus of these notes. We do need to be aware of and understand at least at a high level some of the most common security controls we will run into. This is the aim of this section before we move on and look more at credentialed enumeration of AD.
+
+#### 1. **Microsoft Defender for Endpoint (MDE) | Windows Defender**
+Microsoft Defender, the built-in anti-malware and endpoint protection solution for Windows, is a primary security control that we need to be aware of. It monitors and blocks suspicious activities, detects malware, and can even isolate machines. It has significantly improved in recent years and of course is involved in a cat-and-mouse game with attackers.
+
+##### **Enumeration Techniques**:
+- **Checking the Status**:
+    We can check the *status* of defender using the built-in powershell cmdlet `Get-MpComputerStatus` If we see that the `RealTimeProtection` parameter has a value of `True` we will know that defender is *active* on the computer.
+- **Check Defender’s Real-Time Protection Status**:
+  ```powershell
+  Get-MpPreference | Select-Object -Property DisableRealtimeMonitoring
+  ```
+  This PowerShell command checks if Defenders real-time protection is disabled (a value of `True` indicates it is off).
+
+- **Check if Microsoft Defender is Running**:
+  ```powershell
+  Get-Service | Where-Object {$_.DisplayName -like "*Defender*" -and $_.Status -eq "Running"}
+  ```
+  Lists all running Defender-related services.
+
+![ad52](/images/52.png)
+
+![ad53](/images/53.png)
+
+![ad54](/images/54.png)
+
+##### **Evasion**:
+Methods for evading Defender include *obfuscating payloads* or using techniques like *process hollowing* - these methods are out of the scope of these notes but hopefully we will cover anti-virus solution bypasses in another repo.
+
+#### 2. **AppLocker**
+AppLocker is a Windows feature that restricts which scripts, executables, and DLLs can run on a system. It is essentialy an *application whitelist*. It's commonly used in enterprise environments to block unauthorized scripts and binaries.
+
+An *application whitelist* such as applocker is designed to help organizations control which applications, scripts, executables, and DLLs are allowed to run on their systems. This control is managed through rules and policies that specify which software is permitted to execute based on factors like file path, file hash, publisher, or even specific user groups.
+
+##### How AppLocker Works
+AppLocker uses **whitelist** rules, meaning only the applications that are explicitly allowed are permitted to run, while all other software is blocked by default. This "default-deny" approach makes it an effective security control for preventing the execution of unauthorized or malicious software, reducing the risk of malware and unwanted applications running on corporate machines.
+
+##### Key Features of AppLocker:
+1. **Executable Rules**: Controls .exe and .com files.
+2. **Windows Installer Rules**: Controls .msi and .msp files.
+3. **Script Rules**: Controls PowerShell (.ps1), batch files (.bat), and JavaScript (.js).
+4. **DLL Rules**: Controls DLL (.dll) and OCX files.
+5. **Packaged App Rules**: Controls Microsoft Store apps and app installers.
+
+##### Typical AppLocker Rules:
+1. **Allow List**: Only explicitly allowed applications can be executed.
+2. **Deny List**: Certain applications are blocked.
+3. **Default Rules**: Basic rules that allow Windows components and administrative tools to run.
+
+##### Use Cases:
+- Preventing unauthorized software installations.
+- Blocking execution of potentially harmful scripts.
+- Controlling which versions of applications can run.
+  
+##### AppLocker Limitations:
+- AppLocker is only available in specific editions of Windows (e.g., Enterprise and Education).
+- It requires configuration and management through Group Policy.
+- Can be bypassed if not properly implemented, especially by more sophisticated attackers.
+
+##### **Enumeration Techniques**:
+- **Enumerate AppLocker Rules Using PowerShell**:
+  ```powershell
+  Get-AppLockerPolicy -Effective | Select -Xml -XPath "//RuleCollection"
+  ```
+  This command retrieves the effective AppLocker policy and outputs the active rules. We can also use
+  ```powershell
+  Get-AppLockerPolicy -Effective | select -Expand Property RuleCollections
+  ```
+
+##### **Example Simple Bypass 1**:
+Organizations often block domain users from using powershell on their workstations - this is typically achieved by using applocker to *deny* access to the *powershell.exe* for example at `%SYSTEM32%\WINDOWSPOWERSHELL\V1.0\POWERSHELL.EXE`
+
+We need to remember that *powershell* can be found in [alternative locations](https://www.powershelladmin.com/wiki/PowerShell_Executables_File_System_Locations.php) such as `%SystemRoot%\SysWOW64\WindowsPowerShell\v1.0\powershell.exe` and if these have not been blocked we can easily bypass the applocker block by using these paths instead of the one specified in the applocker rule.
+
+>[!NOTE]
+>Just because it states `v1.0` in the path does not mean it will be version 1 in reality | microsoft left the directory name at this in order to facilitate *backward compatibility* for scripts which make reference to it
+
+##### **Example Simple Bypass 2**:
+Instead of calling powershell from an alternative location we could try copying it to an alternative location which is not covered by the applocker rules and then running it from there - an example would be `copy C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe C:\Temp\myPowershell.exe
+C:\Temp\myPowershell.exe`
+
+### 3. **PowerShell Constrained Language Mode**
+Constrained Language Mode is a PowerShell security feature that restricts certain scripting functions to reduce the risk of malicious code execution. It limits .NET and COM access, and can restrict various scripting actions.
+
+#### **Enumeration Techniques**:
+- **Check if PowerShell is in Constrained Language Mode**:
+  ```powershell
+  $ExecutionContext.SessionState.LanguageMode
+  ```
+  If the output is `ConstrainedLanguage`, then PowerShell is operating under restricted permissions.
+
+![ad55](/images/55.png)
+
+#### **Basic Bypass**:
+A basic bypass involves using alternate command-line languages such as VBScript, or even running commands through `powershell.exe` with the `-Version 2` flag to attempt to downgrade to an unrestricted PowerShell 2.0 session:
+```powershell
+powershell.exe -Version 2
+```
+
+>[!NOTE]
+>Many modern environments have deprecated PowerShell 2.0 due to security concerns but it is still worth a try :smiley: 
+
+#### Summary
+Understanding these defenses is important when maintaining persistence and avoiding detection in a domain environment. When encountering these controls, the priority is often to detect, understand, and selectively bypass them without triggering alarms.
+
+>[IMPORTANT]
+>The general goal when pentesting AD environments should be to operate as stealthily as possible | we need to minimize changes and focus on reconnaissance before acting
