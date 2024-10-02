@@ -1394,8 +1394,11 @@ We need to remember that *powershell* can be found in [alternative locations](ht
 >Just because it states `v1.0` in the path does not mean it will be version 1 in reality | microsoft left the directory name at this in order to facilitate *backward compatibility* for scripts which make reference to it
 
 ##### **Example Simple Bypass 2**:
-Instead of calling powershell from an alternative location we could try copying it to an alternative location which is not covered by the applocker rules and then running it from there - an example would be `copy C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe C:\Temp\myPowershell.exe
-C:\Temp\myPowershell.exe`
+Instead of calling powershell from an alternative location we could try copying it to an alternative location which is not covered by the applocker rules and then running it from there - an example would be
+```powershell
+copy C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe C:\Temp\myPowershell.exe
+C:\Temp\myPowershell.exe
+```
 
 ### 3. **PowerShell Constrained Language Mode**
 Constrained Language Mode is a PowerShell security feature that restricts certain scripting functions to reduce the risk of malicious code execution. It limits .NET and COM access, and can restrict various scripting actions.
