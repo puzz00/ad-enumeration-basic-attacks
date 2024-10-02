@@ -1421,5 +1421,5 @@ powershell.exe -Version 2
 #### Summary
 Understanding these defenses is important when maintaining persistence and avoiding detection in a domain environment. When encountering these controls, the priority is often to detect, understand, and selectively bypass them without triggering alarms.
 
->[IMPORTANT]
+>[!IMPORTANT]
 >The general goal when pentesting AD environments should be to operate as stealthily as possible | we need to minimize changes and focus on reconnaissance before acting
