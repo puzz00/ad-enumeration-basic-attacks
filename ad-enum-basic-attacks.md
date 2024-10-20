@@ -2402,7 +2402,7 @@ You can type these queries into the **Raw Query** box in the GUI.
 ![ad94](/images/94.png)
 
 >[!TIP]
->Lots of useful commands can be found on cheatsheets like (this one)[https://hausec.com/2019/09/09/bloodhound-cypher-cheatsheet/]
+>Lots of useful commands can be found on cheatsheets like [this one](https://hausec.com/2019/09/09/bloodhound-cypher-cheatsheet/)
 
 ---
 
